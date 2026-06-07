@@ -9,12 +9,12 @@ async function loadData() {
         const response = await fetch(API_URL);
         gacData = await response.json();
         render();
-    } catch (error) {
-        document.getElementById("app").innerHTML = "Error loading data";
-        console.error(error);
-    }
-}
+} catch (error) {
+    document.getElementById("app").innerHTML =
+        "Error: " + error.message;
 
+    console.error(error);
+}
 function render() {
     const app = document.getElementById("app");
     const teams = Object.keys(gacData[currentMode] || {});
