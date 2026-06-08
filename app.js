@@ -6,6 +6,9 @@ const API_URL = "https://script.google.com/macros/s/AKfycbwSg1axISAAWN2AIMq5U6su
 let gacData = {};
 let currentMode = "5v5";
 
+let usedTeams =
+    JSON.parse(localStorage.getItem("usedTeams") || "[]");
+
 async function loadData() {
     try {
         const response = await fetch(API_URL);
@@ -27,6 +30,22 @@ const app = document.getElementById("app");
 
 app.innerHTML = `
 <h2>SWGOH Counters v${APP_VERSION}</h2>
+
+<button
+    onclick="resetRound()"
+    style="
+        margin-bottom:10px;
+        padding:8px 12px;
+        background:#f44336;
+        color:white;
+        border:none;
+        border-radius:6px;
+    "
+>
+    Reset GAC Round
+</button>
+
+<br><br>
 
     <button
         onclick="setMode('5v5')"
@@ -68,6 +87,30 @@ function setMode(mode) {
 }
 
 function getTierColour(tier) {
+
+function markUsed(teamName) {
+
+    if (!usedTeams.includes(teamName)) {
+        usedTeams.push(teamName);
+
+        localStorage.setItem(
+            "usedTeams",
+            JSON.stringify(usedTeams)
+        );
+    }
+
+    showCounters();
+}
+
+function resetRound() {
+
+    usedTeams = [];
+
+    localStorage.removeItem("usedTeams");
+
+    showCounters();
+}
+    
     switch ((tier || "").toUpperCase()) {
         case "S":
             return "#4CAF50"; // Green
@@ -90,8 +133,19 @@ function showCounters() {
     const counters = gacData[currentMode][team] || [];
 
     // FIXED: Wrapped the HTML template in backticks so JavaScript handles it correctly
-    document.getElementById("results").innerHTML = counters.map(counter => `
-        <div style="border:1px solid #ccc; border-radius:8px; padding:10px; margin-top:10px;">
+    document.getElementById("results").innerHTML = counters.map(counter => {
+
+const isUsed =
+    usedTeams.includes(counter.counter);
+
+return `
+<div style="
+    border:1px solid #ccc;
+    border-radius:8px;
+    padding:10px;
+    margin-top:10px;
+    opacity:${isUsed ? "0.5" : "1"};
+">
             <strong>${counter.counter}</strong><br>
             Tier:
 <span
@@ -109,8 +163,27 @@ function showCounters() {
             Banner Score: ${counter.bannerScore || "-"}<br>
             Undersize: ${counter.undersize || "-"}<br>
             Notes: ${counter.notes || ""}
+
+<br><br>
+
+${
+    isUsed
+    ?
+
+    `<strong style="color:red;">
+        ✓ USED
+    </strong>`
+
+    :
+
+    `<button
+        onclick="markUsed('${counter.counter}')"
+    >
+        Mark Used
+    </button>`
+}
         </div>
-    `).join("");
+}).join("");
 }
 
 // Start the app
