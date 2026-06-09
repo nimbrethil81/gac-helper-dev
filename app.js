@@ -23,7 +23,8 @@ function render() {
     const teams = Object.keys(gacData[currentMode] || {})
     .filter(team =>
         team.toLowerCase().includes(searchText.toLowerCase())
-    );
+    )
+    .sort((a, b) => a.localeCompare(b));
 
     app.innerHTML = `
         <h2>SWGOH Counters v${APP_VERSION}</h2>
@@ -66,6 +67,12 @@ function setMode(mode) {
 function updateSearch(value) {
     searchText = value;
     render();
+
+    const teamSelect = document.getElementById("teamSelect");
+
+    if (teamSelect && teamSelect.options.length > 0) {
+        showCounters();
+    }
 }
 
 // FIXED: Extracted into its own properly scoped function
