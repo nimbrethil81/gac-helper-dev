@@ -66,13 +66,21 @@ function setMode(mode) {
 
 function updateSearch(value) {
     searchText = value;
-    render();
 
     const teamSelect = document.getElementById("teamSelect");
 
-    if (teamSelect && teamSelect.options.length > 0) {
-        showCounters();
-    }
+    const teams = Object.keys(gacData[currentMode] || {})
+        .filter(team =>
+            team.toLowerCase().includes(searchText.toLowerCase())
+        )
+        .sort((a, b) => a.localeCompare(b));
+
+    teamSelect.innerHTML =
+        teams.map(team =>
+            `<option value="${team}">${team}</option>`
+        ).join("");
+
+    showCounters();
 }
 
 // FIXED: Extracted into its own properly scoped function
