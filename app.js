@@ -96,14 +96,16 @@ function resetRound() {
 }
 
 function showCounters() {
-    if (teamSelect.options.length === 0) {
+    
+    const teamSelect = document.getElementById("teamSelect");
+    if (!teamSelect || !teamSelect.value) return;
+    
+if (teamSelect.options.length === 0) {
     document.getElementById("results").innerHTML =
         "<p>No matching defence teams found.</p>";
     return;
 }
-    const teamSelect = document.getElementById("teamSelect");
-    if (!teamSelect || !teamSelect.value) return;
-
+    
     const team = teamSelect.value;
     const counters = (gacData[currentMode] && gacData[currentMode][team]) || [];
 
