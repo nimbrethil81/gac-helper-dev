@@ -122,7 +122,29 @@ if (teamSelect.options.length === 0) {
 }
     
     const team = teamSelect.value;
-    const counters = (gacData[currentMode] && gacData[currentMode][team]) || [];
+    const counters = ((gacData[currentMode] && gacData[currentMode][team]) || [])
+    .sort((a, b) => {
+
+        const tierOrder = {
+            "S": 1,
+            "A": 2,
+            "B": 3,
+            "C": 4
+        };
+
+        const tierDiff =
+            (tierOrder[a.tier?.toUpperCase()] || 99) -
+            (tierOrder[b.tier?.toUpperCase()] || 99);
+
+        if (tierDiff !== 0) {
+            return tierDiff;
+        }
+
+        return (
+            Number(b.bannerScore || 0) -
+            Number(a.bannerScore || 0)
+        );
+    });
 
     document.getElementById("results").innerHTML = counters.map(counter => {
         const isUsed = usedTeams.includes(counter.counter);
