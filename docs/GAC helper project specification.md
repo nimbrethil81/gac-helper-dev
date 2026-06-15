@@ -167,24 +167,11 @@ Selected mode must be visually highlighted.
 
 Counter tiers displayed using colour coding.
 
-| Tier | Colour |
-| ---- | ------ |
-| S    | Green  |
-| A    | Blue   |
-| B    | Orange |
-| C    | Red    |
-
 ---
 
 ## FR-004 Version Display
 
-App version displayed prominently.
-
-Example:
-
-```text
-SWGOH Counters v1.3
-```
+App version displayed.
 
 ---
 
@@ -208,12 +195,6 @@ Stored locally.
 ## FR-006 Round Reset
 
 User can reset all used teams.
-
-Button:
-
-```text
-Reset GAC Round
-```
 
 ---
 
