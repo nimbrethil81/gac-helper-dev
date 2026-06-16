@@ -196,7 +196,7 @@ if (teamSelect.options.length === 0) {
     document.getElementById("results").innerHTML = counters.map(counter => {
         const isUsed = usedTeams.includes(counter.counter);
 
-        return `return `
+        return `
 <div class="counter-card ${isUsed ? "used" : ""}">
 
     <div class="card-header">
