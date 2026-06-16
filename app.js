@@ -27,7 +27,6 @@ function render() {
     .sort((a, b) => a.localeCompare(b));
 
     app.innerHTML = `
-        app.innerHTML = `
 
 <div class="round-card">
 
