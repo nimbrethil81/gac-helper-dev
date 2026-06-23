@@ -8,16 +8,12 @@ let characterDefinitions = {};
 let currentMode = "5v5";
 let usedTeams = JSON.parse(localStorage.getItem("usedTeams") || "[]");
 let searchText = "";
-//remove these after testing
-let ownedCharacters = [
-
-    "DARTH_BANE",
-
-    "LEIA_ORGANA",
-
-    "CAPTAIN_DROGAN"
-
-];
+let ownedCharacters =
+    JSON.parse(
+        localStorage.getItem(
+            "ownedCharacters"
+        ) || "[]"
+    );
 
 async function loadData() {
     try {
