@@ -6,9 +6,11 @@ let gacData = {};
 let counterDefinitions = {};
 let characterDefinitions = {};
 let currentMode = "5v5";
+let currentView = "counters";
 let usedTeams = JSON.parse(localStorage.getItem("usedTeams") || "[]");
 let searchText = "";
 let ownedCharacters = JSON.parse(localStorage.getItem("ownedCharacters") || "[]");
+let rosterSearch = "";
 
 async function loadData() {
     try {
@@ -27,8 +29,72 @@ async function loadData() {
     }
 }
 
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+
+// Returns the display name for a character ID
+function getCharacterName(characterId) {
+    const def = characterDefinitions[characterId];
+    if (!def) return characterId;
+    return def.name || characterId;
+}
+
+// Returns only CHARACTER-type entries, sorted by name
+function getCharacterList() {
+    return Object.entries(characterDefinitions)
+        .filter(([, def]) => def.unitType === "CHARACTER")
+        .map(([id, def]) => ({ id, name: def.name }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function getTierColour(tier) {
+    switch ((tier || "").toUpperCase()) {
+        case "S": return "#1976D2";
+        case "A": return "#4CAF50";
+        case "B": return "#FF9800";
+        case "C": return "#F44336";
+        default:  return "#999999";
+    }
+}
+
+function getUsedTeamCount() {
+    return usedTeams.length;
+}
+
+// ─── NAVIGATION ──────────────────────────────────────────────────────────────
+
+function setView(view) {
+    currentView = view;
+    render();
+}
+
+// ─── RENDER ──────────────────────────────────────────────────────────────────
+
 function render() {
     const app = document.getElementById("app");
+
+    app.innerHTML = `
+<div class="nav-toggle">
+    <button class="nav-button ${currentView === "counters" ? "active" : ""}" onclick="setView('counters')">
+        ⚔️ Counters
+    </button>
+    <button class="nav-button ${currentView === "roster" ? "active" : ""}" onclick="setView('roster')">
+        👤 Roster
+    </button>
+</div>
+
+${currentView === "counters" ? renderCounters() : renderRoster()}
+
+<div class="footer">v${APP_VERSION}</div>
+`;
+
+    if (currentView === "counters") {
+        showCounters();
+    }
+}
+
+// ─── COUNTERS VIEW ───────────────────────────────────────────────────────────
+
+function renderCounters() {
 
     const teams = Object.keys(gacData[currentMode] || {})
         .filter(team =>
@@ -36,8 +102,7 @@ function render() {
         )
         .sort((a, b) => a.localeCompare(b));
 
-    app.innerHTML = `
-
+    return `
 <div class="round-card">
     <div class="round-title">🏆 CURRENT ROUND</div>
     <div class="round-stat">Used Teams: ${getUsedTeamCount()}</div>
@@ -63,11 +128,7 @@ function render() {
 </select>
 
 <div id="results"></div>
-
-<div class="footer">v${APP_VERSION}</div>
 `;
-
-    showCounters();
 }
 
 function setMode(mode) {
@@ -92,27 +153,12 @@ function updateSearch(value) {
     showCounters();
 }
 
-function getTierColour(tier) {
-    switch ((tier || "").toUpperCase()) {
-        case "S": return "#1976D2";
-        case "A": return "#4CAF50";
-        case "B": return "#FF9800";
-        case "C": return "#F44336";
-        default:  return "#999999";
-    }
-}
-
-// CHANGED: keys on counterId, not display name
 function markUsed(counterId) {
     if (!usedTeams.includes(counterId)) {
         usedTeams.push(counterId);
         localStorage.setItem("usedTeams", JSON.stringify(usedTeams));
     }
     showCounters();
-}
-
-function getUsedTeamCount() {
-    return usedTeams.length;
 }
 
 function resetRound() {
@@ -124,7 +170,6 @@ function resetRound() {
     render();
 }
 
-// CHANGED: reads required (mode-agnostic) instead of required5v5/required3v3
 function getAvailability(counterId) {
 
     const def = counterDefinitions[counterId];
@@ -161,19 +206,14 @@ function showCounters() {
 
     const counters = ((gacData[currentMode] && gacData[currentMode][team]) || [])
         .sort((a, b) => {
-
             const tierOrder = { "S": 1, "A": 2, "B": 3, "C": 4 };
-
             const tierDiff =
                 (tierOrder[a.tier?.toUpperCase()] || 99) -
                 (tierOrder[b.tier?.toUpperCase()] || 99);
-
             if (tierDiff !== 0) return tierDiff;
-
             return Number(b.bannerScore || 0) - Number(a.bannerScore || 0);
         });
 
-    // CHANGED: isUsed checks counterId
     document.getElementById("results").innerHTML = counters.map(counter => {
 
         const isUsed = usedTeams.includes(counter.counterId);
@@ -198,9 +238,7 @@ function showCounters() {
         ${!availability.available ? `
         <div style="margin-top:6px;">
             ❌ <strong>Missing:</strong>
-            ${availability.missing
-                .map(id => characterDefinitions[id] || id)
-                .join(", ")}
+            ${availability.missing.map(id => getCharacterName(id)).join(", ")}
         </div>` : ""}
     </div>
 
@@ -214,6 +252,103 @@ function showCounters() {
 </div>
 `;
     }).join("");
+}
+
+// ─── ROSTER VIEW ─────────────────────────────────────────────────────────────
+
+function renderRoster() {
+
+    const allCharacters = getCharacterList();
+
+    const filtered = allCharacters.filter(c =>
+        c.name.toLowerCase().includes(rosterSearch.toLowerCase())
+    );
+
+    const ownedCount = allCharacters.filter(c =>
+        ownedCharacters.includes(c.id)
+    ).length;
+
+    return `
+<div class="round-card">
+    <div class="round-title">👤 MY ROSTER</div>
+    <div class="round-stat">${ownedCount} / ${allCharacters.length} characters owned</div>
+    <button class="reset-button" onclick="clearRoster()" style="background:#555;">
+        Clear Roster
+    </button>
+</div>
+
+<input
+    type="text"
+    class="search-box"
+    placeholder="Search characters..."
+    value="${rosterSearch}"
+    oninput="updateRosterSearch(this.value)"
+>
+
+<div class="roster-list">
+    ${filtered.map(c => {
+        const owned = ownedCharacters.includes(c.id);
+        return `
+<div class="roster-row ${owned ? "owned" : ""}" onclick="toggleOwned('${c.id}')">
+    <span class="roster-name">${c.name}</span>
+    <span class="roster-status">${owned ? "✅" : "➕"}</span>
+</div>
+`;
+    }).join("")}
+</div>
+`;
+}
+
+function updateRosterSearch(value) {
+    rosterSearch = value;
+    const app = document.getElementById("app");
+    const rosterList = app.querySelector(".roster-list");
+    if (!rosterList) return;
+
+    const allCharacters = getCharacterList();
+    const filtered = allCharacters.filter(c =>
+        c.name.toLowerCase().includes(value.toLowerCase())
+    );
+
+    rosterList.innerHTML = filtered.map(c => {
+        const owned = ownedCharacters.includes(c.id);
+        return `
+<div class="roster-row ${owned ? "owned" : ""}" onclick="toggleOwned('${c.id}')">
+    <span class="roster-name">${c.name}</span>
+    <span class="roster-status">${owned ? "✅" : "➕"}</span>
+</div>
+`;
+    }).join("");
+}
+
+function toggleOwned(characterId) {
+    const idx = ownedCharacters.indexOf(characterId);
+    if (idx === -1) {
+        ownedCharacters.push(characterId);
+    } else {
+        ownedCharacters.splice(idx, 1);
+    }
+    localStorage.setItem("ownedCharacters", JSON.stringify(ownedCharacters));
+    updateRosterSearch(rosterSearch);
+    updateRosterStat();
+}
+
+function updateRosterStat() {
+    const stat = document.querySelector(".round-stat");
+    if (!stat) return;
+    const allCharacters = getCharacterList();
+    const ownedCount = allCharacters.filter(c =>
+        ownedCharacters.includes(c.id)
+    ).length;
+    stat.textContent = `${ownedCount} / ${allCharacters.length} characters owned`;
+}
+
+function clearRoster() {
+    const confirmed = confirm("Clear all owned characters?");
+    if (!confirmed) return;
+    ownedCharacters = [];
+    localStorage.removeItem("ownedCharacters");
+    render();
 }
 
 // Start the app
