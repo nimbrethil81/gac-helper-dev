@@ -32,3 +32,11 @@
 - Counters sorted by status group (Available → Used → Not owned), then tier and banner score
 - Ownership vocabulary: "Owned / Not owned" replaces "Available / Unavailable"
 - CURRENT ROUND card: Reset Round moved inline
+## v1.9
+- roster persistence hardening (versioned storage schema, single save/load path, migration from old format)
+- "last saved" indicator on roster screen
+- export roster to clipboard
+- import roster (validate-before-apply, replaces current roster, reports skipped unrecognised characters)
+- undo import (restores previous roster within the session)
+- best-effort persistent-storage request to reduce eviction
+- collapsible "manage roster data" panel
