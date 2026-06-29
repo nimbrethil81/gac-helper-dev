@@ -108,12 +108,7 @@ The flow is **read-only**: the app fetches data but never writes back to Sheets.
 All player-specific state is held client-side in `localStorage`:
 
 * **Used teams** — keyed on `Counter_ID`, persisted across app launches.
-* **Owned characters** - versioned roster object {schema, savedAt, source, owned[]},
-  single save/load path, one-time migration from pre-v1.9 bare array.
-  Storage is localStorage; the app requests persistent storage on boot
-  (navigator.storage.persist()) as best-effort eviction resistance.
-  iOS WebKit confirmed to purge localStorage on swipe-away from the app switcher
-  regardless; manual Export and v2.0 remote import are the durable backstops.
+* **Owned characters** - versioned roster object {schema, savedAt, source, owned[]}, single save/load path, one-time migration from pre-v1.9 bare array. Storage is localStorage; the app requests persistent storage on boot (navigator.storage.persist()) as best-effort eviction resistance. Roster loss reproduced under Safari Private Browsing (expected ephemeral-storage behaviour); normal browsing retains storage; persist() remains as best-effort eviction resistance for the non-private cases.; manual Export and v2.0 remote import are the durable backstops.
 * **Banner tracking** — the current round's scores (own, opponent, remaining), persisted across app launches and cleared by Reset Round.
 
 Because state is local to the device and browser, it does not sync across devices and is lost if site data is cleared or the PWA is reinstalled. This is acceptable at the current stage; cloud-backed persistence is addressed by the Roster Import work in [§8](#8-roadmap).
