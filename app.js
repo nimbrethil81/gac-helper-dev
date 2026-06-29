@@ -1,6 +1,10 @@
 // app.js
-const APP_VERSION = "1.8";
+const APP_VERSION = "1.9";
 const API_URL = "https://script.google.com/macros/s/AKfycbwSg1axISAAWN2AIMq5U6suLdj9yrfgeT1h2Nys_NT2M0D-9NA-xJ8YVKKMLKKiDcKMdA/exec";
+
+const ROSTER_SCHEMA = 1;
+const ROSTER_KEY = "rosterData";          // v1.9 versioned object
+const LEGACY_ROSTER_KEY = "ownedCharacters"; // pre-v1.9 bare array
 
 let gacData = {};
 let counterDefinitions = {};
@@ -9,12 +13,96 @@ let currentMode = "5v5";
 let currentView = "counters";
 let usedTeams = JSON.parse(localStorage.getItem("usedTeams") || "[]");
 let searchText = "";
-let ownedCharacters = JSON.parse(localStorage.getItem("ownedCharacters") || "[]");
+
+// Roster state. ownedCharacters stays the in-memory array the rest of the
+// app reads; rosterMeta carries savedAt/source for the "last saved" line.
+let ownedCharacters = [];
+let rosterMeta = { savedAt: null, source: "manual" };
+
 let rosterSearch = "";
+let rosterPanelOpen = false;            // collapsible data panel state
+let rosterBackup = null;                // session-only snapshot for Undo import
+let importDraft = "";                   // text currently in the import box
+let rosterMessage = null;               // { text, kind: "ok" | "warn" | "error" }
+
 let bannerData = JSON.parse(
     localStorage.getItem("bannerData") || '{"myScore":0,"oppScore":0,"remaining":0}'
 );
 let counterFilter = localStorage.getItem("counterFilter") || "all";
+
+// ─── ROSTER PERSISTENCE ────────────────────────────────────────────────────────
+// Single load/save path. localStorage is the source of truth for owned
+// characters; the app never writes back to the Google Sheet.
+
+function loadRoster() {
+    // Preferred: v1.9 versioned object.
+    const raw = localStorage.getItem(ROSTER_KEY);
+    if (raw) {
+        try {
+            const parsed = JSON.parse(raw);
+            if (parsed && Array.isArray(parsed.owned)) {
+                ownedCharacters = parsed.owned.slice();
+                rosterMeta = {
+                    savedAt: parsed.savedAt || null,
+                    source: parsed.source || "manual"
+                };
+                return;
+            }
+        } catch (e) {
+            console.error("Roster parse failed, attempting legacy migration", e);
+        }
+    }
+
+    // One-time migration: pre-v1.9 bare array under ownedCharacters.
+    const legacy = localStorage.getItem(LEGACY_ROSTER_KEY);
+    if (legacy) {
+        try {
+            const arr = JSON.parse(legacy);
+            if (Array.isArray(arr)) {
+                ownedCharacters = arr.slice();
+                rosterMeta = { savedAt: null, source: "manual" };
+                saveRoster("manual");                 // re-write in new schema
+                localStorage.removeItem(LEGACY_ROSTER_KEY);
+                return;
+            }
+        } catch (e) {
+            console.error("Legacy roster parse failed", e);
+        }
+    }
+
+    // Nothing stored.
+    ownedCharacters = [];
+    rosterMeta = { savedAt: null, source: "manual" };
+}
+
+function saveRoster(source) {
+    if (source) rosterMeta.source = source;
+    rosterMeta.savedAt = new Date().toISOString();
+
+    const payload = {
+        schema: ROSTER_SCHEMA,
+        savedAt: rosterMeta.savedAt,
+        source: rosterMeta.source,
+        owned: ownedCharacters
+    };
+    localStorage.setItem(ROSTER_KEY, JSON.stringify(payload));
+}
+
+// Shared replace path. v2.0 API import will call this with source "swgoh.gg"
+// etc. Caller is responsible for validation; this just commits.
+function applyRoster(owned, source) {
+    ownedCharacters = owned.slice();
+    saveRoster(source);
+}
+
+function formatSavedAt(iso) {
+    if (!iso) return "Not saved yet";
+    const d = new Date(iso);
+    if (isNaN(d)) return "Not saved yet";
+    const date = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    return `${date}, ${time}`;
+}
 
 async function loadData() {
     try {
@@ -99,6 +187,12 @@ function getCounterStatus(counterId) {
 
 function setView(view) {
     currentView = view;
+    // Defensive re-read whenever the roster screen is entered: guards against
+    // partial storage eviction by another tab/instance between renders.
+    if (view === "roster") {
+        loadRoster();
+        rosterMessage = null;
+    }
     render();
 }
 
@@ -481,13 +575,15 @@ function renderRoster() {
         ownedCharacters.includes(c.id)
     ).length;
 
+    const savedLine = rosterMeta.savedAt
+        ? `Last saved: ${formatSavedAt(rosterMeta.savedAt)} (${rosterMeta.source})`
+        : "Not saved yet";
+
     return `
 <div class="round-card">
     <div class="round-title">👤 MY ROSTER</div>
     <div class="round-stat">${ownedCount} / ${allCharacters.length} characters owned</div>
-    <button class="reset-button" onclick="clearRoster()" style="background:#555;">
-        Clear Roster
-    </button>
+    <div class="roster-saved-line">${savedLine}</div>
 </div>
 
 <input
@@ -498,18 +594,72 @@ function renderRoster() {
     oninput="updateRosterSearch(this.value)"
 >
 
+${renderRosterDataPanel()}
+
 <div class="roster-list">
-    ${filtered.map(c => {
-        const owned = ownedCharacters.includes(c.id);
-        return `
+    ${filtered.map(renderRosterRow).join("")}
+</div>
+`;
+}
+
+function renderRosterRow(c) {
+    const owned = ownedCharacters.includes(c.id);
+    return `
 <div class="roster-row ${owned ? "owned" : ""}" onclick="toggleOwned('${c.id}')">
     <span class="roster-name">${c.name}</span>
     <span class="roster-status">${owned ? "✅" : "➕"}</span>
 </div>
 `;
-    }).join("")}
+}
+
+// Collapsible "Manage roster data" panel: Export / Import / Clear.
+// Undo surfaces here only while a session backup exists.
+function renderRosterDataPanel() {
+
+    const messageHtml = rosterMessage
+        ? `<div class="roster-msg roster-msg-${rosterMessage.kind}">${rosterMessage.text}</div>`
+        : "";
+
+    const undoHtml = rosterBackup
+        ? `<button class="roster-data-btn roster-undo-btn" onclick="undoImport()">Undo import</button>`
+        : "";
+
+    const body = rosterPanelOpen ? `
+<div class="roster-data-body">
+
+    ${messageHtml}
+    ${undoHtml}
+
+    <button class="roster-data-btn" onclick="exportRoster()">Export roster</button>
+
+    <label class="roster-data-label" for="importBox">Paste exported roster here</label>
+    <textarea
+        id="importBox"
+        class="roster-import-box"
+        placeholder='{"schema":1,"owned":[ ... ]}'
+        oninput="importDraft = this.value"
+    >${importDraft}</textarea>
+    <button class="roster-data-btn" onclick="importRoster()">Import roster</button>
+
+    <button class="roster-data-btn roster-clear-btn" onclick="clearRoster()">Clear roster</button>
+
+</div>
+` : "";
+
+    return `
+<div class="roster-data-panel">
+    <button class="roster-data-toggle" onclick="toggleRosterPanel()">
+        <span>⚙ Manage roster data</span>
+        <span>${rosterPanelOpen ? "▾" : "▸"}</span>
+    </button>
+    ${body}
 </div>
 `;
+}
+
+function toggleRosterPanel() {
+    rosterPanelOpen = !rosterPanelOpen;
+    render();
 }
 
 function updateRosterSearch(value) {
@@ -523,15 +673,7 @@ function updateRosterSearch(value) {
         c.name.toLowerCase().includes(value.toLowerCase())
     );
 
-    rosterList.innerHTML = filtered.map(c => {
-        const owned = ownedCharacters.includes(c.id);
-        return `
-<div class="roster-row ${owned ? "owned" : ""}" onclick="toggleOwned('${c.id}')">
-    <span class="roster-name">${c.name}</span>
-    <span class="roster-status">${owned ? "✅" : "➕"}</span>
-</div>
-`;
-    }).join("");
+    rosterList.innerHTML = filtered.map(renderRosterRow).join("");
 }
 
 function toggleOwned(characterId) {
@@ -541,7 +683,7 @@ function toggleOwned(characterId) {
     } else {
         ownedCharacters.splice(idx, 1);
     }
-    localStorage.setItem("ownedCharacters", JSON.stringify(ownedCharacters));
+    saveRoster("manual");
     updateRosterSearch(rosterSearch);
     updateRosterStat();
 }
@@ -557,12 +699,162 @@ function updateRosterStat() {
 }
 
 function clearRoster() {
-    const confirmed = confirm("Clear all owned characters?");
+    const confirmed = confirm("Clear all owned characters? In SWGOH you rarely lose characters, so this is mainly for starting over.");
     if (!confirmed) return;
     ownedCharacters = [];
-    localStorage.removeItem("ownedCharacters");
+    saveRoster("manual");
+    rosterMessage = null;
+    rosterBackup = null;
     render();
 }
 
-// Start the app
+// ─── EXPORT ────────────────────────────────────────────────────────────────────
+
+function buildExportPayload() {
+    return JSON.stringify({
+        schema: ROSTER_SCHEMA,
+        savedAt: rosterMeta.savedAt || new Date().toISOString(),
+        source: rosterMeta.source || "manual",
+        owned: ownedCharacters
+    });
+}
+
+async function exportRoster() {
+    if (!hasRoster()) {
+        rosterMessage = { text: "Nothing to export — your roster is empty.", kind: "warn" };
+        render();
+        return;
+    }
+
+    const text = buildExportPayload();
+
+    try {
+        await navigator.clipboard.writeText(text);
+        rosterMessage = {
+            text: `Copied ${ownedCharacters.length} characters to the clipboard. Paste it somewhere safe.`,
+            kind: "ok"
+        };
+        render();
+    } catch (e) {
+        // Clipboard API blocked/unavailable: fall back to a selectable box.
+        console.error("Clipboard write failed, showing manual copy box", e);
+        showExportFallback(text);
+    }
+}
+
+function showExportFallback(text) {
+    rosterMessage = {
+        text: "Couldn't copy automatically. Select the text below and copy it manually.",
+        kind: "warn"
+    };
+    render();
+
+    const body = document.querySelector(".roster-data-body");
+    if (!body) return;
+
+    const box = document.createElement("textarea");
+    box.className = "roster-import-box";
+    box.readOnly = true;
+    box.value = text;
+    body.appendChild(box);
+    box.focus();
+    box.select();
+}
+
+// ─── IMPORT ────────────────────────────────────────────────────────────────────
+// Validate fully before mutating. On any failure the existing roster is left
+// untouched (we never wrote to it). On success we snapshot for Undo, replace,
+// and report imported/skipped counts (lenient-reported).
+
+function importRoster() {
+    const raw = (importDraft || "").trim();
+
+    if (!raw) {
+        rosterMessage = { text: "Paste an exported roster into the box first.", kind: "warn" };
+        render();
+        return;
+    }
+
+    // ── Parse ──────────────────────────────────────────────────────
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (e) {
+        rosterMessage = { text: "That isn't valid roster data. Check you pasted the whole thing.", kind: "error" };
+        render();
+        return;
+    }
+
+    // ── Validate shape ─────────────────────────────────────────────
+    const incoming = parsed && Array.isArray(parsed.owned) ? parsed.owned
+                   : Array.isArray(parsed) ? parsed          // tolerate a bare array
+                   : null;
+
+    if (!incoming) {
+        rosterMessage = { text: "That data has no character list in it.", kind: "error" };
+        render();
+        return;
+    }
+
+    // ── Validate IDs against the master registry (lenient-reported) ──
+    const known = [];
+    const skipped = [];
+    const seen = new Set();
+
+    incoming.forEach(id => {
+        if (typeof id !== "string") { skipped.push(String(id)); return; }
+        if (seen.has(id)) return;                 // dedupe defensively
+        seen.add(id);
+        if (characterDefinitions[id] && characterDefinitions[id].unitType === "CHARACTER") {
+            known.push(id);
+        } else {
+            skipped.push(id);
+        }
+    });
+
+    if (known.length === 0) {
+        rosterMessage = {
+            text: "None of those characters were recognised. Nothing was imported.",
+            kind: "error"
+        };
+        render();
+        return;
+    }
+
+    // ── Commit: snapshot for Undo, then replace ────────────────────
+    rosterBackup = {
+        owned: ownedCharacters.slice(),
+        meta: { savedAt: rosterMeta.savedAt, source: rosterMeta.source }
+    };
+
+    const importSource = (parsed && parsed.source) ? parsed.source : "import";
+    applyRoster(known, importSource);
+
+    importDraft = "";
+    rosterMessage = {
+        text: skipped.length
+            ? `Imported ${known.length} characters. Skipped ${skipped.length} unrecognised.`
+            : `Imported ${known.length} characters.`,
+        kind: skipped.length ? "warn" : "ok"
+    };
+    render();
+}
+
+function undoImport() {
+    if (!rosterBackup) return;
+    ownedCharacters = rosterBackup.owned.slice();
+    rosterMeta = {
+        savedAt: rosterBackup.meta.savedAt,
+        source: rosterBackup.meta.source
+    };
+    // Persist the restored state under the new schema.
+    saveRoster(rosterMeta.source || "manual");
+    rosterBackup = null;
+    rosterMessage = { text: "Import undone. Previous roster restored.", kind: "ok" };
+    render();
+}
+
+// ─── BOOT ───────────────────────────────────────────────────────────────────
+
+loadRoster();   // hydrate roster (with migration) before first paint
 loadData();
