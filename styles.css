@@ -362,6 +362,15 @@ body {
     margin-bottom: 12px;
 }
 
+/* Single container: toggle + body share one bordered box. */
+.roster-data-panel {
+    margin-bottom: 12px;
+    border: 1px solid #22324a;
+    border-radius: 10px;
+    background: var(--panel);
+    overflow: hidden;
+}
+
 .roster-data-toggle {
     width: 100%;
     box-sizing: border-box;
@@ -370,14 +379,23 @@ body {
     align-items: center;
 
     padding: 10px 14px;
-    border: 1px solid #22324a;
-    border-radius: 10px;
-    background: var(--panel);
+    border: none;
+    background: transparent;
 
     color: var(--muted);
     font-size: 13px;
     font-weight: bold;
     cursor: pointer;
+}
+
+.roster-data-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    padding: 0 14px 14px;
+    border: none;
+    background: transparent;
 }
 
 .roster-data-body {
