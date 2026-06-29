@@ -154,9 +154,13 @@ function renderCounters() {
 
     return `
 <div class="round-card">
-    <div class="round-title">🏆 CURRENT ROUND</div>
-    <div class="round-stat">Used Teams: ${getUsedTeamCount()}</div>
-    <button class="reset-button" onclick="resetRound()">Reset Round</button>
+    <div class="round-card-row">
+        <div>
+            <div class="round-title">🏆 CURRENT ROUND</div>
+            <div class="round-stat">Used Teams: ${getUsedTeamCount()}</div>
+        </div>
+        <button class="reset-button-inline" onclick="resetRound()">Reset Round</button>
+    </div>
 </div>
 
 <div class="mode-toggle">
@@ -178,9 +182,9 @@ function renderCounters() {
 </select>
 
 <div class="counter-filter">
-    <button class="counter-filter-btn ${counterFilter === "all"       ? "active" : ""}" onclick="setCounterFilter('all')">All</button>
-    <button class="counter-filter-btn ${counterFilter === "owned"     ? "active" : ""}" onclick="setCounterFilter('owned')">Owned</button>
-    <button class="counter-filter-btn ${counterFilter === "available" ? "active" : ""}" onclick="setCounterFilter('available')">Available</button>
+    <button class="counter-filter-btn ${counterFilter === "all"       ? "active" : ""}" data-filter="all"       onclick="setCounterFilter('all')">All</button>
+    <button class="counter-filter-btn ${counterFilter === "owned"     ? "active" : ""}" data-filter="owned"     onclick="setCounterFilter('owned')">Owned</button>
+    <button class="counter-filter-btn ${counterFilter === "available" ? "active" : ""}" data-filter="available" onclick="setCounterFilter('available')">Available</button>
 </div>
 
 <div id="results"></div>
@@ -190,6 +194,15 @@ function renderCounters() {
 function setCounterFilter(filter) {
     counterFilter = filter;
     localStorage.setItem("counterFilter", filter);
+
+    document.querySelectorAll(".counter-filter-btn").forEach(btn => {
+        btn.classList.remove("active");
+    });
+    const activeBtn = document.querySelector(
+        `.counter-filter-btn[data-filter="${filter}"]`
+    );
+    if (activeBtn) activeBtn.classList.add("active");
+
     showCounters();
 }
 
