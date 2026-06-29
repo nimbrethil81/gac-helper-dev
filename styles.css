@@ -47,7 +47,7 @@ body {
     border: 1px solid #22324a;
     border-radius: 14px;
     padding: 15px;
-    margin-bottom: 20px;
+    margin-bottom: 12px;
     position: relative;
     overflow: hidden;
 
@@ -86,8 +86,28 @@ body {
     border-radius: 10px;
     padding: 12px;
 
+    background: #555;
+    color: white;
+    font-weight: bold;
+
+    cursor: pointer;
+}
+
+.round-card-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.reset-button-inline {
+    flex-shrink: 0;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 14px;
+
     background: #d32f2f;
     color: white;
+    font-size: 13px;
     font-weight: bold;
 
     cursor: pointer;
@@ -100,7 +120,7 @@ body {
     background: var(--panel);
     padding: 4px;
     border-radius: 12px;
-    margin-bottom: 20px;
+    margin-bottom: 12px;
 }
 
 .mode-button {
