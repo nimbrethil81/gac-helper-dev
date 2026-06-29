@@ -1,5 +1,5 @@
 // app.js
-const APP_VERSION = "1.7";
+const APP_VERSION = "1.8";
 const API_URL = "https://script.google.com/macros/s/AKfycbwSg1axISAAWN2AIMq5U6suLdj9yrfgeT1h2Nys_NT2M0D-9NA-xJ8YVKKMLKKiDcKMdA/exec";
 
 let gacData = {};
@@ -14,7 +14,7 @@ let rosterSearch = "";
 let bannerData = JSON.parse(
     localStorage.getItem("bannerData") || '{"myScore":0,"oppScore":0,"remaining":0}'
 );
-let showAvailableOnly = JSON.parse(localStorage.getItem("showAvailableOnly") || "false");
+let counterFilter = localStorage.getItem("counterFilter") || "all";
 
 async function loadData() {
     try {
@@ -64,6 +64,35 @@ function getUsedTeamCount() {
 
 function hasRoster() {
     return ownedCharacters.length > 0;
+}
+
+// ─── OWNERSHIP ───────────────────────────────────────────────────────────────
+
+function getOwnership(counterId) {
+    const def = counterDefinitions[counterId];
+
+    if (!def) {
+        return { owned: false, missing: ["Missing definition"] };
+    }
+
+    const required = def.required || [];
+    const missing = required.filter(
+        characterId => !ownedCharacters.includes(characterId)
+    );
+
+    return {
+        owned: missing.length === 0,
+        missing
+    };
+}
+
+// Returns "available" | "used" | "not-owned"
+// Precedence: not-owned dominates; used only applies to owned counters.
+function getCounterStatus(counterId) {
+    const { owned } = getOwnership(counterId);
+    if (!owned) return "not-owned";
+    if (usedTeams.includes(counterId)) return "used";
+    return "available";
 }
 
 // ─── NAVIGATION ──────────────────────────────────────────────────────────────
@@ -123,10 +152,6 @@ function renderCounters() {
         )
         .sort((a, b) => a.localeCompare(b));
 
-    const rosterEmpty = !hasRoster();
-    const toggleDisabled = rosterEmpty ? "disabled" : "";
-    const toggleActive = (showAvailableOnly && !rosterEmpty) ? "active" : "";
-
     return `
 <div class="round-card">
     <div class="round-title">🏆 CURRENT ROUND</div>
@@ -152,39 +177,19 @@ function renderCounters() {
     ${teams.map(team => `<option value="${team}">${team}</option>`).join("")}
 </select>
 
-<div class="available-filter">
-    <span class="available-filter-label">Show available only</span>
-    <button
-        class="filter-toggle ${toggleActive}"
-        onclick="toggleAvailableFilter()"
-        ${toggleDisabled}
-        aria-pressed="${showAvailableOnly && !rosterEmpty}"
-    >
-        <span class="filter-toggle-track">
-            <span class="filter-toggle-thumb"></span>
-        </span>
-    </button>
+<div class="counter-filter">
+    <button class="counter-filter-btn ${counterFilter === "all"       ? "active" : ""}" onclick="setCounterFilter('all')">All</button>
+    <button class="counter-filter-btn ${counterFilter === "owned"     ? "active" : ""}" onclick="setCounterFilter('owned')">Owned</button>
+    <button class="counter-filter-btn ${counterFilter === "available" ? "active" : ""}" onclick="setCounterFilter('available')">Available</button>
 </div>
-${rosterEmpty ? `<p class="filter-hint">Add characters to your roster to use this filter.</p>` : ""}
 
 <div id="results"></div>
 `;
 }
 
-function toggleAvailableFilter() {
-    showAvailableOnly = !showAvailableOnly;
-    localStorage.setItem("showAvailableOnly", JSON.stringify(showAvailableOnly));
-    // Re-render only the toggle state and results — avoids full render flash
-    const toggleBtn = document.querySelector(".filter-toggle");
-    if (toggleBtn) {
-        if (showAvailableOnly) {
-            toggleBtn.classList.add("active");
-            toggleBtn.setAttribute("aria-pressed", "true");
-        } else {
-            toggleBtn.classList.remove("active");
-            toggleBtn.setAttribute("aria-pressed", "false");
-        }
-    }
+function setCounterFilter(filter) {
+    counterFilter = filter;
+    localStorage.setItem("counterFilter", filter);
     showCounters();
 }
 
@@ -231,36 +236,27 @@ function resetRound() {
     render();
 }
 
-function getAvailability(counterId) {
-
-    const def = counterDefinitions[counterId];
-
-    if (!def) {
-        return { available: false, missing: ["Missing definition"] };
-    }
-
-    const required = def.required || [];
-
-    const missing = required.filter(
-        characterId => !ownedCharacters.includes(characterId)
-    );
-
-    return {
-        available: missing.length === 0,
-        missing
-    };
-}
+// ─── COUNTER CARD ─────────────────────────────────────────────────────────────
 
 function buildCounterCardHtml(counter) {
-    const isUsed = usedTeams.includes(counter.counterId);
-    const availability = getAvailability(counter.counterId);
+    const status = getCounterStatus(counter.counterId);
+    const ownership = getOwnership(counter.counterId);
+
+    // Status word: green for available, muted for used and not-owned
+    const statusClass = status === "available" ? "status-available" : "status-muted";
+    const statusText  = status === "available" ? "Available"
+                      : status === "used"      ? "Used"
+                      : "Not owned";
+
+    // Card dims for used and not-owned
+    const dimClass = status === "available" ? "" : "used";
 
     return `
-<div class="counter-card ${isUsed ? "used" : ""}">
+<div class="counter-card ${dimClass}">
 
     <div class="card-header">
         <div class="team-name">${counter.counter}</div>
-        <div>${availability.available ? "🟢 Available" : "🔴 Unavailable"}</div>
+        <span class="${statusClass}">${statusText}</span>
         <span class="tier-badge" style="background:${getTierColour(counter.tier)};">
             ${counter.tier}
         </span>
@@ -271,102 +267,115 @@ function buildCounterCardHtml(counter) {
 
     <div>
         📝 <strong>Notes:</strong> ${counter.notes || "-"}
-        ${!availability.available ? `
+        ${!ownership.owned ? `
         <div style="margin-top:6px;">
             ❌ <strong>Missing:</strong>
-            ${availability.missing.map(id => getCharacterName(id)).join(", ")}
+            ${ownership.missing.map(id => getCharacterName(id)).join(", ")}
         </div>` : ""}
     </div>
 
-    ${isUsed
-        ? `<div class="used-label">✓ USED</div>`
-        : `<button class="mark-used-button" onclick="markUsed('${counter.counterId}')">
-               Mark Used
-           </button>`
+    ${status === "used"
+        ? ""
+        : status === "available"
+            ? `<button class="mark-used-button" onclick="markUsed('${counter.counterId}')">Mark Used</button>`
+            : ""
     }
 
 </div>
 `;
 }
 
-function revealUnavailable() {
-    const stub = document.getElementById("unavailableStub");
-    if (!stub) return;
+// ─── SORT ─────────────────────────────────────────────────────────────────────
 
-    const teamSelect = document.getElementById("teamSelect");
-    if (!teamSelect) return;
-
-    const team = teamSelect.value;
-    const counters = ((gacData[currentMode] && gacData[currentMode][team]) || [])
-        .sort((a, b) => {
-            const tierOrder = { "S": 1, "A": 2, "B": 3, "C": 4 };
-            const tierDiff =
-                (tierOrder[a.tier?.toUpperCase()] || 99) -
-                (tierOrder[b.tier?.toUpperCase()] || 99);
-            if (tierDiff !== 0) return tierDiff;
-            return Number(b.bannerScore || 0) - Number(a.bannerScore || 0);
-        });
-
-    const unavailable = counters.filter(c => !getAvailability(c.counterId).available);
-
-    stub.outerHTML = unavailable.map(buildCounterCardHtml).join("");
+function tierSortValue(tier) {
+    return { "S": 1, "A": 2, "B": 3, "C": 4 }[tier?.toUpperCase()] || 99;
 }
+
+// Three-tier group sort: Available → Used → Not owned.
+// Within each group: tier asc, then banner score desc.
+function sortCounters(counters) {
+    const groupRank = { "available": 1, "used": 2, "not-owned": 3 };
+
+    return [...counters].sort((a, b) => {
+        const statusA = getCounterStatus(a.counterId);
+        const statusB = getCounterStatus(b.counterId);
+
+        const groupDiff = groupRank[statusA] - groupRank[statusB];
+        if (groupDiff !== 0) return groupDiff;
+
+        const tierDiff = tierSortValue(a.tier) - tierSortValue(b.tier);
+        if (tierDiff !== 0) return tierDiff;
+
+        return Number(b.bannerScore || 0) - Number(a.bannerScore || 0);
+    });
+}
+
+// ─── SHOW COUNTERS ────────────────────────────────────────────────────────────
 
 function showCounters() {
 
     const teamSelect = document.getElementById("teamSelect");
     if (!teamSelect) return;
 
+    const resultsEl = document.getElementById("results");
+
     if (teamSelect.options.length === 0) {
-        document.getElementById("results").innerHTML =
-            "<p style='padding:12px;color:var(--muted);'>No matching defence teams found.</p>";
+        resultsEl.innerHTML =
+            "<p class='empty-state'>No matching defence teams found.</p>";
         return;
     }
 
     const team = teamSelect.value;
     if (!team) return;
 
-    const counters = ((gacData[currentMode] && gacData[currentMode][team]) || [])
-        .sort((a, b) => {
-            const tierOrder = { "S": 1, "A": 2, "B": 3, "C": 4 };
-            const tierDiff =
-                (tierOrder[a.tier?.toUpperCase()] || 99) -
-                (tierOrder[b.tier?.toUpperCase()] || 99);
-            if (tierDiff !== 0) return tierDiff;
-            return Number(b.bannerScore || 0) - Number(a.bannerScore || 0);
-        });
+    const allCounters = sortCounters(
+        (gacData[currentMode] && gacData[currentMode][team]) || []
+    );
 
-    // Filter is off or roster is empty — show everything as before
-    if (!showAvailableOnly || !hasRoster()) {
-        document.getElementById("results").innerHTML =
-            counters.map(buildCounterCardHtml).join("");
+    // ── Roster empty hint ──────────────────────────────────────────
+    // Shown only on Owned and Available filters when no roster is set up.
+    if (!hasRoster() && counterFilter !== "all") {
+        resultsEl.innerHTML =
+            "<p class='empty-state'>Set up your roster to see which counters you can field.</p>";
         return;
     }
 
-    // Filter is on — partition into available and unavailable
-    const available   = counters.filter(c =>  getAvailability(c.counterId).available);
-    const unavailable = counters.filter(c => !getAvailability(c.counterId).available);
+    // ── Filter ────────────────────────────────────────────────────
+    let filtered;
 
-    // Zero available — show message only
-    if (available.length === 0) {
-        document.getElementById("results").innerHTML =
-            "<p style='padding:12px;color:var(--muted);'>No available counters — toggle off to see all.</p>";
-        return;
+    if (counterFilter === "all") {
+        filtered = allCounters;
+
+    } else if (counterFilter === "owned") {
+        filtered = allCounters.filter(c =>
+            getCounterStatus(c.counterId) !== "not-owned"
+        );
+
+        if (filtered.length === 0) {
+            resultsEl.innerHTML =
+                "<p class='empty-state'>You don't own any counters for this team.</p>";
+            return;
+        }
+
+    } else {
+        // "available"
+        filtered = allCounters.filter(c =>
+            getCounterStatus(c.counterId) === "available"
+        );
+
+        if (filtered.length === 0) {
+            // Distinguish: own at least one counter (all used) vs own none
+            const ownsAny = allCounters.some(c =>
+                getOwnership(c.counterId).owned
+            );
+            resultsEl.innerHTML = ownsAny
+                ? "<p class='empty-state'>You've used all your counters for this team.</p>"
+                : "<p class='empty-state'>You don't own any counters for this team.</p>";
+            return;
+        }
     }
 
-    // Some available — render them, then append stub if anything is hidden
-    let html = available.map(buildCounterCardHtml).join("");
-
-    if (unavailable.length > 0) {
-        const label = unavailable.length === 1
-            ? "+ 1 unavailable counter"
-            : `+ ${unavailable.length} unavailable counters`;
-        html += `<div class="unavailable-stub" id="unavailableStub" onclick="revealUnavailable()">
-            ${label} — tap to reveal
-        </div>`;
-    }
-
-    document.getElementById("results").innerHTML = html;
+    resultsEl.innerHTML = filtered.map(buildCounterCardHtml).join("");
 }
 
 // ─── BANNERS VIEW ────────────────────────────────────────────────────────────
