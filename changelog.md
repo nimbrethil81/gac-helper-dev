@@ -33,10 +33,17 @@
 - Ownership vocabulary: "Owned / Not owned" replaces "Available / Unavailable"
 - CURRENT ROUND card: Reset Round moved inline
 ## v1.9
-- roster persistence hardening (versioned storage schema, single save/load path, migration from old format)
-- "last saved" indicator on roster screen
-- export roster to clipboard
-- import roster (validate-before-apply, replaces current roster, reports skipped unrecognised characters)
-- undo import (restores previous roster within the session)
-- best-effort persistent-storage request to reduce eviction
-- collapsible "manage roster data" panel
+- Roster persistence hardening: versioned storage schema `{schema, savedAt, source, owned}`,
+  single `loadRoster()` / `saveRoster()` path, one-time migration from pre-v1.9 bare array
+- Defensive roster re-read on every entry to the Roster screen
+- "Last saved" indicator on Roster screen (date, time, source)
+- Export roster to clipboard (with select-to-copy fallback)
+- Import roster: paste JSON, validate before mutating, replace semantics,
+  lenient-reported (imported / skipped counts), Undo import for session rollback
+- `applyRoster(owned, source)` shared entry point — v2.0 API import reuses this
+- Best-effort `navigator.storage.persist()` request to reduce OS eviction
+- Collapsible "Manage roster data" panel (Export / Import / Undo / Clear roster)
+- Clear Roster moved from header into panel — destructive action, rare in SWGOH
+- Root cause confirmed: iOS WebKit purges localStorage on swipe-away from app
+  switcher; persist() mitigates on Chrome/Android; v2.0 remote import is the
+  durable fix
