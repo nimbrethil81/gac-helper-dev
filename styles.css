@@ -318,6 +318,11 @@ body {
 
 /* ─── ROSTER ─────────────────────────────────────────────────────── */
 
+.roster-saved-line {
+    font-size: 12px;
+    color: var(--muted);
+}
+
 .roster-list {
     display: flex;
     flex-direction: column;
@@ -349,6 +354,118 @@ body {
 
 .roster-status {
     font-size: 18px;
+}
+
+/* ─── ROSTER DATA PANEL ──────────────────────────────────────────── */
+
+.roster-data-panel {
+    margin-bottom: 12px;
+}
+
+.roster-data-toggle {
+    width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    padding: 10px 14px;
+    border: 1px solid #22324a;
+    border-radius: 10px;
+    background: var(--panel);
+
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.roster-data-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    margin-top: 8px;
+    padding: 14px;
+
+    border: 1px solid #22324a;
+    border-radius: 10px;
+    background: var(--panel);
+}
+
+.roster-data-label {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 4px;
+}
+
+.roster-data-btn {
+    width: 100%;
+    box-sizing: border-box;
+    border: none;
+    border-radius: 8px;
+    padding: 11px;
+
+    background: var(--panel-light);
+    color: var(--text);
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.roster-undo-btn {
+    background: var(--jedi-blue);
+    color: black;
+}
+
+.roster-clear-btn {
+    background: #555;
+    color: white;
+    margin-top: 4px;
+}
+
+.roster-import-box {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 72px;
+    resize: vertical;
+
+    padding: 10px 12px;
+    background: var(--bg);
+    color: var(--text);
+
+    border: 1px solid #22324a;
+    border-radius: 8px;
+
+    font-family: monospace;
+    font-size: 12px;
+}
+
+/* ─── ROSTER MESSAGES ────────────────────────────────────────────── */
+
+.roster-msg {
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.roster-msg-ok {
+    background: rgba(102,187,106,0.12);
+    border: 1px solid #2e5c3a;
+    color: var(--s-tier);
+}
+
+.roster-msg-warn {
+    background: rgba(255,183,77,0.12);
+    border: 1px solid #5c4a2e;
+    color: var(--b-tier);
+}
+
+.roster-msg-error {
+    background: rgba(239,83,80,0.12);
+    border: 1px solid #5c2e2e;
+    color: var(--c-tier);
 }
 
 /* ─── BANNER TRACKING ────────────────────────────────────────────── */
