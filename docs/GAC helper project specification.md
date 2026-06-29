@@ -108,10 +108,12 @@ The flow is **read-only**: the app fetches data but never writes back to Sheets.
 All player-specific state is held client-side in `localStorage`:
 
 * **Used teams** — keyed on `Counter_ID`, persisted across app launches.
-* **Owned characters** — keyed on `Character_ID`, persisted across app launches.
+* **Owned characters** — stored under a versioned roster object (schema, savedAt, source, owned), keyed on Character_ID, with a single save/load path and one-time migration from the earlier bare-array format. Persisted across app launches.
 * **Banner tracking** — the current round's scores (own, opponent, remaining), persisted across app launches and cleared by Reset Round.
 
 Because state is local to the device and browser, it does not sync across devices and is lost if site data is cleared or the PWA is reinstalled. This is acceptable at the current stage; cloud-backed persistence is addressed by the Roster Import work in [§8](#8-roadmap).
+
+Because localStorage in an installed PWA can be evicted by the operating system, the app makes a best-effort request for persistent storage and provides manual Export/Import as a durable backup. Eviction resistance is improved but not guaranteed on all platforms; durable, cross-device persistence is the goal of the Roster Import work in §8.
 
 ---
 
@@ -216,6 +218,8 @@ This feature is intentionally **manual and self-contained**. It does not attempt
 
 A dedicated Roster view, reached from the bottom navigation bar, lists every `CHARACTER`-type unit (ships and capital ships are excluded). The user searches and taps to toggle ownership, with a running owned/total count. Ownership is stored locally and feeds directly into availability calculations. A clear-roster action resets all ownership.
 
+Roster ownership is stored under a versioned local schema with a single save/load path, and the screen shows when the roster was last saved and from which source. A collapsible Manage roster data panel provides Export (copies the roster to the clipboard as JSON), Import (validates pasted roster data, replaces the current roster, and reports any unrecognised characters that were skipped), Undo import (restores the previous roster within the session), and Clear roster. Import and Export share the same internal format and the same apply path that the planned roster import in §8 will reuse. Clear roster lives in this panel rather than the header because a SWGOH roster rarely shrinks; clearing is a deliberate maintenance action, not part of normal use.
+
 ### 6.5 Counter Status
 
 Each counter carries a tri-state status derived from two independent axes:
@@ -276,6 +280,10 @@ A "show available only" toggle to hide unavailable counters, with a stub reveal 
 
 **v1.8 — Used Team Awareness** · *Complete*
 Unified tri-state counter status (Available / Used / Not owned) replacing the separate availability indicator and used-label. Three-segment filter [All] [Owned] [Available] with per-filter empty states, group-first sort order, and ownership vocabulary replacing the previous available/unavailable language.
+
+**v1.9 — Roster Persistence & Portability** · *Complete*
+
+Versioned roster storage with single save/load path and migration, last-saved indicator, clipboard export, validated import with replace semantics and skipped-character reporting, undo import, best-effort persistent storage, and a collapsible roster-data panel.
 
 **v2.0 — Roster Import** · *Planned*
 Import roster data from external sources (e.g. SWGOH.gg, HotUtils, or other public roster APIs). Manual roster entry remains available as a fallback, and local storage becomes a cache rather than the source of truth.
