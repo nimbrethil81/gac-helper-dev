@@ -44,6 +44,4 @@
 - Best-effort `navigator.storage.persist()` request to reduce OS eviction
 - Collapsible "Manage roster data" panel (Export / Import / Undo / Clear roster)
 - Clear Roster moved from header into panel — destructive action, rare in SWGOH
-- Root cause confirmed: iOS WebKit purges localStorage on swipe-away from app
-  switcher; persist() mitigates on Chrome/Android; v2.0 remote import is the
-  durable fix
+- Roster loss reproduced under Safari Private Browsing (expected ephemeral-storage behaviour); normal browsing retains storage; persist() remains as best-effort eviction resistance for the non-private cases.
