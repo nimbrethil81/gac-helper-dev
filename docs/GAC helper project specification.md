@@ -288,6 +288,8 @@ Versioned storage schema, single save/load path, migration, last-saved indicator
 **v2.0 — Roster Import** · *Planned*
 Import roster data from external sources (e.g. SWGOH.gg, HotUtils, or other public roster APIs). Manual roster entry remains available as a fallback, and local storage becomes a cache rather than the source of truth.
 
+**v2.5 - Fleet Support** *Planned*
+roster stores ships, fleet counter data, fleet toggle, fleet availability. 
 ---
 
 ## 9. Success Criteria
