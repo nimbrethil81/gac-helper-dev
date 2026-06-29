@@ -104,6 +104,26 @@ function formatSavedAt(iso) {
     return `${date}, ${time}`;
 }
 
+// ─── PERSISTENT STORAGE REQUEST ───────────────────────────────────────────────
+// Best-effort: asks the OS to exempt our storage from automatic eviction.
+// Effective on Chromium/Android and desktop; limited on iOS WebKit, where a
+// swipe-away from the app switcher can still purge storage. Manual Export and
+// the planned remote import (v2.0) are the durable backstops.
+
+async function requestPersistentStorage() {
+    try {
+        if (navigator.storage && navigator.storage.persist) {
+            const already = await navigator.storage.persisted();
+            if (!already) {
+                const granted = await navigator.storage.persist();
+                console.log("Persistent storage granted:", granted);
+            }
+        }
+    } catch (e) {
+        console.error("persist() request failed", e);
+    }
+}
+
 async function loadData() {
     try {
         const response = await fetch(API_URL);
@@ -856,5 +876,6 @@ function undoImport() {
 
 // ─── BOOT ───────────────────────────────────────────────────────────────────
 
-loadRoster();   // hydrate roster (with migration) before first paint
+requestPersistentStorage();  // best-effort eviction resistance
+loadRoster();                // hydrate roster (with migration) before first paint
 loadData();
