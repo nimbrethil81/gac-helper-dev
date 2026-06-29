@@ -108,7 +108,12 @@ The flow is **read-only**: the app fetches data but never writes back to Sheets.
 All player-specific state is held client-side in `localStorage`:
 
 * **Used teams** — keyed on `Counter_ID`, persisted across app launches.
-* **Owned characters** — stored under a versioned roster object (schema, savedAt, source, owned), keyed on Character_ID, with a single save/load path and one-time migration from the earlier bare-array format. Persisted across app launches.
+* **Owned characters** - versioned roster object {schema, savedAt, source, owned[]},
+  single save/load path, one-time migration from pre-v1.9 bare array.
+  Storage is localStorage; the app requests persistent storage on boot
+  (navigator.storage.persist()) as best-effort eviction resistance.
+  iOS WebKit confirmed to purge localStorage on swipe-away from the app switcher
+  regardless; manual Export and v2.0 remote import are the durable backstops.
 * **Banner tracking** — the current round's scores (own, opponent, remaining), persisted across app launches and cleared by Reset Round.
 
 Because state is local to the device and browser, it does not sync across devices and is lost if site data is cleared or the PWA is reinstalled. This is acceptable at the current stage; cloud-backed persistence is addressed by the Roster Import work in [§8](#8-roadmap).
@@ -283,7 +288,7 @@ Unified tri-state counter status (Available / Used / Not owned) replacing the se
 
 **v1.9 — Roster Persistence & Portability** · *Complete*
 
-Versioned roster storage with single save/load path and migration, last-saved indicator, clipboard export, validated import with replace semantics and skipped-character reporting, undo import, best-effort persistent storage, and a collapsible roster-data panel.
+Versioned storage schema, single save/load path, migration, last-saved indicator, clipboard export, validated import with replace semantics and undo, best-effort persistent storage, collapsible roster-data panel. Root cause of roster loss confirmed as iOS WebKit eviction on swipe-away; v2.0 remote import resolves this.
 
 **v2.0 — Roster Import** · *Planned*
 Import roster data from external sources (e.g. SWGOH.gg, HotUtils, or other public roster APIs). Manual roster entry remains available as a fallback, and local storage becomes a cache rather than the source of truth.
