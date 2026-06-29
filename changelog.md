@@ -26,3 +26,9 @@
 - Toggle state persists across sessions (localStorage)
 - Toggle disabled with hint when roster is empty
 - Empty-result state when no available counters exist for selected team
+## v1.8
+- Tri-state counter status: Available / Used / Not owned
+- Three-segment filter: [All] [Owned] [Available]
+- Counters sorted by status group (Available → Used → Not owned), then tier and banner score
+- Ownership vocabulary: "Owned / Not owned" replaces "Available / Unavailable"
+- CURRENT ROUND card: Reset Round moved inline
