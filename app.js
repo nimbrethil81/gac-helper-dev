@@ -871,14 +871,14 @@ function renderRosterDataPanel() {
 
     <button class="roster-data-btn" onclick="exportRoster()">Export roster</button>
 
-    <label class="roster-data-label" for="importBox">Paste exported roster here</label>
+<label class="roster-data-label" for="importBox">Restore from exported text</label>
     <textarea
         id="importBox"
         class="roster-import-box"
         placeholder='{"schema":2,"owned":[ ... ]}'
         oninput="importDraft = this.value"
     >${importDraft}</textarea>
-    <button class="roster-data-btn" onclick="importRoster()">Import roster</button>
+<button class="roster-data-btn" onclick="importRoster()">Import from text</button>
 
     <button class="roster-data-btn roster-clear-btn" onclick="clearRoster()">Clear roster</button>
 
