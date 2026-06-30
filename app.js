@@ -7,7 +7,7 @@ const ROSTER_KEY = "rosterData";             // versioned object
 const LEGACY_ROSTER_KEY = "ownedCharacters"; // pre-v1.9 bare array
 
 const ROSTER_SOURCE_API = "swgoh.gg";        // source tag for API-imported rosters
-const ROSTER_FETCH_TIMEOUT_MS = 15000;       // user-initiated import/refresh timeout
+const ROSTER_FETCH_TIMEOUT_MS = 60000;       // user-initiated import/refresh timeout (allows for Render cold start)
 const ROSTER_SYNC_STALE_MS = 1000 * 60 * 60 * 12; // background sync only if older than this
 
 let gacData = {};
@@ -226,16 +226,16 @@ function apiErrorMessage(error) {
         case "invalid_ally_code":
             return "That doesn't look like a 9-digit ally code.";
         case "not_found":
-            return "We couldn't find that ally code on SWGOH.gg. Open your profile on swgoh.gg once to sync it, then try again.";
+            return "We couldn't find that ally code. Double-check the 9 digits and try again.";
         case "rate_limited":
-            return "SWGOH.gg is busy right now. Wait a moment and try again.";
+            return "The game's servers are busy right now. Wait a moment and try again.";
         default:
-            return "Couldn't load your roster from SWGOH.gg. Please try again shortly.";
+            return "Couldn't load your roster right now. Please try again shortly.";
     }
 }
 
 function buildImportSummary(n, ignored, unknown) {
-    const parts = [`Imported ${n} character${n === 1 ? "" : "s"} from SWGOH.gg.`];
+const parts = [`Imported ${n} character${n === 1 ? "" : "s"} from the game.`];
     if (ignored) parts.push(`${ignored} ship${ignored === 1 ? "" : "s"} ignored.`);
     if (unknown) parts.push(`${unknown} unit${unknown === 1 ? "" : "s"} not in the app's database yet — they won't affect counters.`);
     return parts.join(" ");
@@ -278,8 +278,8 @@ async function importFromAllyCode() {
         const timedOut = e && e.name === "AbortError";
         rosterMessage = {
             text: timedOut
-                ? "SWGOH.gg took too long to respond. Check your connection and try again."
-                : "Couldn't reach SWGOH.gg. Check your connection and try again.",
+                ? "The import took too long to respond. Check your connection and try again."
+                : "Couldn't reach the roster service. Check your connection and try again.",
             kind: "error"
         };
         render();
@@ -775,8 +775,8 @@ function renderRoster() {
 
     // Source-aware freshness line: API rosters show "last synced", manual show "last saved".
     const isApi = rosterMeta.source === ROSTER_SOURCE_API && rosterMeta.allyCode;
-    const freshLine = isApi
-        ? `Last synced from SWGOH.gg: ${rosterMeta.syncedAt ? formatSavedAt(rosterMeta.syncedAt) : "never"}`
+const freshLine = isApi
+        ? `Last synced: ${rosterMeta.syncedAt ? formatSavedAt(rosterMeta.syncedAt) : "never"}`
         : (rosterMeta.savedAt
             ? `Last saved: ${formatSavedAt(rosterMeta.savedAt)} (${rosterMeta.source})`
             : "Not saved yet");
@@ -813,15 +813,15 @@ function renderRosterImportCard() {
     const empty = !hasRoster();
     const ally = rosterMeta.allyCode || allyCodeDraft || "";
     const isApi = rosterMeta.source === ROSTER_SOURCE_API && rosterMeta.allyCode;
-    const btnLabel = isApi ? "Refresh from SWGOH.gg" : "Import from SWGOH.gg";
+    const btnLabel = isApi ? "Refresh roster" : "Import roster";
 
     const helper = empty
-        ? `<div class="roster-import-helper">Enter your 9-digit ally code to load your roster from SWGOH.gg.</div>`
+        ? `<div class="roster-import-helper">Enter your 9-digit ally code to load your roster from the game.</div>`
         : "";
 
     return `
 <div class="roster-import-card ${empty ? "empty" : ""}">
-    <div class="roster-import-title">⬇ Import from SWGOH.gg</div>
+    <div class="roster-import-title">⬇ Import roster</div>
     ${helper}
     <input
         type="text"
