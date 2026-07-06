@@ -1,5 +1,5 @@
 // app.js
-const APP_VERSION = "2.0";
+const APP_VERSION = "2.1";
 const API_URL = "https://script.google.com/macros/s/AKfycbwSg1axISAAWN2AIMq5U6suLdj9yrfgeT1h2Nys_NT2M0D-9NA-xJ8YVKKMLKKiDcKMdA/exec";
 
 const ROSTER_SCHEMA = 2;
@@ -50,6 +50,7 @@ let rosterMessage = null;               // { text, kind: "ok" | "warn" | "error"
 // Board state. board is null until set up; league persists across rounds.
 let board = null;
 let leagueDraft = localStorage.getItem(LEAGUE_KEY) || "";
+let roundPlan = null;                   // live allocation plan — recomputed every Round render, never persisted
 
 let bannerData = JSON.parse(
     localStorage.getItem("bannerData") || '{"myScore":0,"oppScore":0,"remaining":0}'
@@ -260,12 +261,242 @@ function clearTerritory(territoryKey) {
     render();
 }
 
+// Mark a counter used straight from a board recommendation. The plan re-solves
+// on the render that follows — no stored plan to keep in sync.
+function markCounterUsedFromBoard(counterId) {
+    if (!usedTeams.includes(counterId)) {
+        usedTeams.push(counterId);
+        localStorage.setItem("usedTeams", JSON.stringify(usedTeams));
+    }
+    render();
+}
+
+// ─── ALLOCATION ENGINE (v2.1) ─────────────────────────────────────────────────
+// Pure derivation from board + roster + used state. Recomputed on every Round
+// render; nothing here is persisted. Exclusivity is enforced at two levels:
+// a counter can be assigned to at most one team, and two counters that share
+// a required character can never both appear in the same plan (characters used
+// on offence are spent for the round).
+
+function requiredChars(counterId) {
+    const def = counterDefinitions[counterId];
+    return (def && def.required) || [];
+}
+
+// Every visible, uncleared, named board team plus its available counters.
+function buildEligibleTeams() {
+    const eligible = [];
+    if (!board) return eligible;
+
+    board.territories.forEach(tDef => {
+        if (tDef.type === "FLEET") return;
+        if (!isTerritoryUnlocked(tDef)) return;
+
+        teamsInTerritory(tDef.territory).forEach(team => {
+            if (team.cleared) return;
+            if (!team.name) return;                       // nothing selected yet
+
+            const key = tDef.territory + ":" + team.index;
+
+            if (team.name === NOT_IN_CATALOGUE) {
+                eligible.push({ key, territory: tDef.territory, index: team.index,
+                                name: null, custom: true, candidates: [] });
+                return;
+            }
+
+            const all = (gacData[board.mode] && gacData[board.mode][team.name]) || [];
+            const seen = new Set();
+            const candidates = [];
+            all.forEach(c => {
+                if (seen.has(c.counterId)) return;
+                seen.add(c.counterId);
+                if (getCounterStatus(c.counterId) === "available") candidates.push(c);
+            });
+
+            eligible.push({ key, territory: tDef.territory, index: team.index,
+                            name: team.name, custom: false, candidates });
+        });
+    });
+
+    return eligible;
+}
+
+// Scarcity-first ordered search with pruning. Objective (Option A, lexicographic):
+// maximise teams covered, then prefer stronger tiers, then higher banner totals.
+// The first complete path is the greedy scarcity-first answer, so even if the
+// node budget is exhausted the result is never worse than greedy.
+function solveAllocation(teams) {
+    const order = teams.slice().sort((a, b) => a.candidates.length - b.candidates.length);
+
+    let best = null;
+    let nodes = 0;
+    const NODE_BUDGET = 50000;
+
+    const usedCounters = new Set();
+    const usedChars = new Set();
+    const assign = {};
+
+    function isBetter(cov, tier, ban) {
+        if (!best) return true;
+        if (cov !== best.coverage) return cov > best.coverage;
+        if (tier !== best.tierSum) return tier < best.tierSum;
+        return ban > best.bannerSum;
+    }
+
+    function dfs(i, cov, tier, ban) {
+        nodes++;
+        if (nodes > NODE_BUDGET) return;
+
+        // Coverage upper bound: even covering every remaining team can't win.
+        const bound = cov + (order.length - i);
+        if (best && bound < best.coverage) return;
+
+        if (i === order.length) {
+            if (isBetter(cov, tier, ban)) {
+                best = { assign: { ...assign }, coverage: cov, tierSum: tier, bannerSum: ban };
+            }
+            return;
+        }
+
+        const t = order[i];
+        const cands = t.candidates.slice().sort((a, b) => {
+            const d = tierSortValue(a.tier) - tierSortValue(b.tier);
+            if (d !== 0) return d;
+            return Number(b.bannerScore || 0) - Number(a.bannerScore || 0);
+        });
+
+        for (const c of cands) {
+            if (usedCounters.has(c.counterId)) continue;
+            const req = requiredChars(c.counterId);
+            if (req.some(ch => usedChars.has(ch))) continue;
+
+            usedCounters.add(c.counterId);
+            req.forEach(ch => usedChars.add(ch));
+            assign[t.key] = c;
+
+            dfs(i + 1, cov + 1, tier + tierSortValue(c.tier), ban + Number(c.bannerScore || 0));
+
+            delete assign[t.key];
+            usedCounters.delete(c.counterId);
+            req.forEach(ch => usedChars.delete(ch));
+        }
+
+        // Branch where this team is left uncovered.
+        dfs(i + 1, cov, tier, ban);
+    }
+
+    dfs(0, 0, 0, 0);
+    return best || { assign: {}, coverage: 0, tierSum: 0, bannerSum: 0 };
+}
+
+// Plain-language reason for each team, grounded in the plan's real alternatives.
+function buildReasons(eligible, assign) {
+    const reasons = {};
+
+    const teamByKey = {};
+    eligible.forEach(t => { teamByKey[t.key] = t; });
+
+    const assignedByCounter = {};   // counterId -> key of the team it's committed to
+    const charHolder = {};          // characterId -> counter name holding it in the plan
+    const usedChars = new Set();
+    Object.entries(assign).forEach(([key, c]) => {
+        assignedByCounter[c.counterId] = key;
+        requiredChars(c.counterId).forEach(ch => {
+            usedChars.add(ch);
+            charHolder[ch] = c.counter;
+        });
+    });
+
+    eligible.forEach(t => {
+        if (t.custom) {
+            reasons[t.key] = { counter: null, reason: "Not in the catalogue — no recommendations for this team." };
+            return;
+        }
+
+        const chosen = assign[t.key] || null;
+
+        if (chosen) {
+            let reason;
+            const rivals = eligible.filter(o =>
+                o.key !== t.key && !o.custom &&
+                o.candidates.some(c => c.counterId === chosen.counterId));
+            const diverted = t.candidates.find(c =>
+                c.counterId !== chosen.counterId &&
+                assignedByCounter[c.counterId] &&
+                assignedByCounter[c.counterId] !== t.key);
+
+            if (t.candidates.length === 1) {
+                reason = "Your only available counter for this team.";
+            } else if (rivals.length) {
+                const o = rivals[0];
+                const oChosen = assign[o.key];
+                reason = oChosen
+                    ? `Also counters ${o.name} — ${oChosen.counter} covers that one instead.`
+                    : `Also eligible against ${o.name}; it scores better used here.`;
+            } else if (diverted) {
+                const other = teamByKey[assignedByCounter[diverted.counterId]];
+                reason = `${diverted.counter} is committed to ${other ? other.name : "another team"} — ${chosen.counter} covers this one.`;
+            } else {
+                reason = "Strongest available option for this team.";
+            }
+            reasons[t.key] = { counter: chosen, reason };
+            return;
+        }
+
+        // No assignment — explain why.
+        let reason;
+        if (t.candidates.length === 0) {
+            const all = (gacData[board.mode] && gacData[board.mode][t.name]) || [];
+            if (all.length === 0) {
+                reason = "No counters in the catalogue for this team yet.";
+            } else if (all.some(c => getOwnership(c.counterId).owned)) {
+                reason = "All your counters for this team have been used.";
+            } else {
+                reason = "You don't own a counter for this team.";
+            }
+        } else {
+            const committed = t.candidates.find(c => assignedByCounter[c.counterId]);
+            if (committed) {
+                const other = teamByKey[assignedByCounter[committed.counterId]];
+                reason = `${committed.counter} is committed to ${other ? other.name : "another team"}.`;
+            } else {
+                let clashText = null;
+                for (const c of t.candidates) {
+                    const ch = requiredChars(c.counterId).find(x => usedChars.has(x));
+                    if (ch) {
+                        clashText = `${c.counter} shares ${getCharacterName(ch)} with ${charHolder[ch]}, which is already assigned.`;
+                        break;
+                    }
+                }
+                reason = clashText || "No workable assignment without weakening another team.";
+            }
+        }
+        reasons[t.key] = { counter: null, reason };
+    });
+
+    return reasons;
+}
+
+function computeRoundPlan() {
+    if (!board) return null;
+
+    const eligible = buildEligibleTeams();
+
+    // Overlap: at least one available counter is eligible against 2+ teams.
+    const counts = {};
+    eligible.forEach(t => t.candidates.forEach(c => {
+        counts[c.counterId] = (counts[c.counterId] || 0) + 1;
+    }));
+    const overlap = Object.values(counts).some(n => n >= 2);
+
+    const solved = solveAllocation(eligible.filter(t => !t.custom));
+    const reasons = buildReasons(eligible, solved.assign);
+
+    return { eligible, overlap, assign: solved.assign, reasons };
+}
+
 // ─── PERSISTENT STORAGE REQUEST ───────────────────────────────────────────────
 // Best-effort: asks the OS to exempt our storage from automatic eviction.
-// Effective on Chromium/Android and desktop. On Safari, Private Browsing uses
-// ephemeral storage that is cleared at session end regardless (expected
-// behaviour, not preventable by persist()); normal browsing retains storage.
-// Manual Export and the ally-code import are the durable backstops.
 
 async function requestPersistentStorage() {
     try {
@@ -305,8 +536,6 @@ async function loadData() {
 }
 
 // ─── EXTERNAL ID MAPPING ───────────────────────────────────────────────────────
-// Reverse index built from characterDefinitions. Keyed by base_id; stores
-// unitType so the importer can classify (character / ship / unknown).
 
 function buildReverseIndex() {
     baseIdToUnit = {};
@@ -316,8 +545,6 @@ function buildReverseIndex() {
     });
 }
 
-// Turn a list of base_ids into owned Character_IDs plus diagnostic buckets.
-// Unit-type-parameterised; defaults to characters only (v2.5 will widen this).
 function classifyBaseIds(baseIds, opts) {
     const wantTypes = (opts && opts.unitTypes) || ["CHARACTER"];
     const ownedCharacterIds = [];
@@ -384,7 +611,6 @@ function buildImportSummary(n, ignored, unknown) {
     return parts.join(" ");
 }
 
-// User-initiated import / refresh (foreground, with feedback and Undo).
 async function importFromAllyCode() {
     const allyCode = String(allyCodeDraft || rosterMeta.allyCode || "").replace(/\D/g, "");
 
@@ -400,8 +626,6 @@ async function importFromAllyCode() {
         return;
     }
 
-    // Confirm only when switching into an API roster or overwriting a different
-    // roster; a routine refresh of the same ally code is silent-on-intent.
     const isRoutineRefresh =
         rosterMeta.source === ROSTER_SOURCE_API && rosterMeta.allyCode === allyCode;
     if (hasRoster() && !isRoutineRefresh) {
@@ -463,7 +687,6 @@ async function importFromAllyCode() {
     render();
 }
 
-// Background refresh (silent, staleness-gated, never mid-edit).
 async function maybeBackgroundSync() {
     if (rosterMeta.source !== ROSTER_SOURCE_API) return; // only API rosters auto-sync
     if (!rosterMeta.allyCode) return;
@@ -546,7 +769,6 @@ function getOwnership(counterId) {
     return { owned: missing.length === 0, missing };
 }
 
-// Returns "available" | "used" | "not-owned"
 function getCounterStatus(counterId) {
     const { owned } = getOwnership(counterId);
     if (!owned) return "not-owned";
@@ -830,8 +1052,6 @@ function showCounters() {
 }
 
 // ─── ROUND VIEW (v2.1) ────────────────────────────────────────────────────────
-// The live-match workspace: round summary + opponent board + banner tracking.
-// Allocation recommendations arrive in stage 3.
 
 function renderRound() {
     const summary = `
@@ -851,7 +1071,6 @@ function renderRound() {
     return summary + boardHtml + renderBannerSection();
 }
 
-// Setup card: shown until a board exists for the round.
 function renderBoardSetup() {
     const configLoaded = Object.keys(boardConfig).length > 0;
 
@@ -883,6 +1102,12 @@ function renderBoardSetup() {
 }
 
 function renderBoard() {
+    roundPlan = computeRoundPlan();   // live re-solve: falls out of render-on-state-change
+
+    const overlapBanner = roundPlan && roundPlan.overlap
+        ? `<div class="roster-msg roster-msg-ok board-overlap">🔀 Shared counters detected — recommendations below account for the overlap.</div>`
+        : "";
+
     const header = `
 <div class="round-card">
     <div class="round-title">🗺️ OPPONENT BOARD</div>
@@ -890,13 +1115,12 @@ function renderBoard() {
 </div>
 `;
     const territories = board.territories.map(renderTerritory).join("");
-    return header + territories;
+    return header + overlapBanner + territories;
 }
 
 function renderTerritory(tDef) {
     const label = TERRITORY_LABELS[tDef.territory] || tDef.territory;
 
-    // Fleet territory: permanently locked until v2.5.
     if (tDef.type === "FLEET") {
         return `
 <div class="board-territory locked">
@@ -909,7 +1133,6 @@ function renderTerritory(tDef) {
 `;
     }
 
-    // Back territory still locked behind its front.
     if (!isTerritoryUnlocked(tDef)) {
         const frontLabel = TERRITORY_LABELS["FRONT_" + tDef.territory.slice(5)] || "the front territory";
         return `
@@ -961,10 +1184,40 @@ function renderBoardTeamRow(territoryKey, team) {
         ${team.cleared ? "✓ Cleared" : "Cleared"}
     </button>
 </div>
+${renderTeamRecommendation(territoryKey, team)}
 `;
 }
 
-// Banner tracking, unchanged behaviour, now living beneath the board.
+// Recommendation block for a single board team. Empty string when there's
+// nothing useful to say (cleared, no team selected, or no plan).
+function renderTeamRecommendation(territoryKey, team) {
+    if (!roundPlan || team.cleared || !team.name) return "";
+
+    const info = roundPlan.reasons[territoryKey + ":" + team.index];
+    if (!info) return "";
+
+    if (info.counter) {
+        const c = info.counter;
+        return `
+<div class="board-rec">
+    <div class="board-rec-line">
+        🎯 <strong>${c.counter}</strong>
+        <span class="tier-badge tier-badge-small" style="background:${getTierColour(c.tier)};">${c.tier}</span>
+        <span class="board-rec-banners">~${c.bannerScore || "?"} banners</span>
+    </div>
+    <div class="board-rec-reason">${info.reason}</div>
+    <button class="board-rec-btn" onclick="markCounterUsedFromBoard('${c.counterId}')">Mark used</button>
+</div>
+`;
+    }
+
+    return `
+<div class="board-rec board-rec-none">
+    <div class="board-rec-reason">${info.reason}</div>
+</div>
+`;
+}
+
 function renderBannerSection() {
 
     const my  = Number(bannerData.myScore)  || 0;
@@ -1051,7 +1304,6 @@ function renderRoster() {
 
     const ownedCount = allCharacters.filter(c => ownedCharacters.includes(c.id)).length;
 
-    // Source-aware freshness line: API rosters show "last synced", manual show "last saved".
     const isApi = rosterMeta.source === ROSTER_SOURCE_API && rosterMeta.allyCode;
     const freshLine = isApi
         ? `Last synced: ${rosterMeta.syncedAt ? formatSavedAt(rosterMeta.syncedAt) : "never"}`
@@ -1085,8 +1337,6 @@ ${renderRosterDataPanel()}
 `;
 }
 
-// Primary import path: prominent when the roster is empty, becomes a Refresh
-// control once a roster has been imported.
 function renderRosterImportCard() {
     const empty = !hasRoster();
     const ally = rosterMeta.allyCode || allyCodeDraft || "";
@@ -1117,7 +1367,6 @@ function renderRosterImportCard() {
 `;
 }
 
-// Top-level message + Undo cluster (visible regardless of the data panel state).
 function renderRosterNotice() {
     if (!rosterMessage && !rosterBackup) return "";
 
@@ -1141,7 +1390,6 @@ function renderRosterRow(c) {
 `;
 }
 
-// Manual data management: Export / paste-import (fallback) / Clear.
 function renderRosterDataPanel() {
 
     const body = rosterPanelOpen ? `
@@ -1267,7 +1515,6 @@ function showExportFallback(text) {
     };
     render();
 
-    // The notice cluster carries the message; append the selectable box to it.
     const host = document.querySelector(".roster-notice") || document.querySelector(".roster-data-body");
     if (!host) return;
 
@@ -1281,7 +1528,6 @@ function showExportFallback(text) {
 }
 
 // ─── IMPORT (paste — manual fallback) ──────────────────────────────────────────
-// Operates on your own Character_IDs (not base_ids). Validate before mutating.
 
 function importRoster() {
     const raw = (importDraft || "").trim();
