@@ -538,7 +538,7 @@ body {
 .ahead { color: var(--s-tier); }
 .behind { color: var(--c-tier); }
 
-/* ─── ROSTER: SWGOH.gg IMPORT CARD ───────────────────────────────── */
+/* ─── ROSTER: IMPORT CARD ────────────────────────────────────────── */
 
 .roster-import-card {
     background: var(--panel);
@@ -602,4 +602,125 @@ body {
     flex-direction: column;
     gap: 8px;
     margin-bottom: 12px;
+}
+
+/* ─── ROUND: BOARD SETUP ─────────────────────────────────────────── */
+
+.board-setup-card {
+    background: var(--panel);
+    border: 1px solid var(--jedi-blue);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 12px;
+
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    box-shadow: 0 0 12px rgba(79,195,247,0.18);
+}
+
+.board-league-select {
+    margin-bottom: 0;
+    background: var(--bg);
+    font-size: 16px;            /* 16px avoids iOS zoom-on-focus */
+}
+
+/* ─── ROUND: OPPONENT BOARD ──────────────────────────────────────── */
+
+.board-territory {
+    background: var(--panel);
+    border: 1px solid #22324a;
+    border-radius: 14px;
+    padding: 14px;
+    margin-bottom: 12px;
+}
+
+.board-territory.locked {
+    opacity: 0.55;
+}
+
+.board-territory-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.board-territory-title {
+    font-size: 13px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+}
+
+.board-territory-progress {
+    font-size: 12px;
+    color: var(--muted);
+    margin-left: auto;
+}
+
+.clear-territory-btn {
+    flex-shrink: 0;
+    border: none;
+    border-radius: 8px;
+    padding: 6px 10px;
+
+    background: var(--panel-light);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.board-locked-note {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.4;
+}
+
+.board-team {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.board-team-select {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 10px;
+
+    background: var(--bg);
+    color: var(--text);
+
+    border: 1px solid #22324a;
+    border-radius: 8px;
+
+    font-size: 16px;            /* 16px avoids iOS zoom-on-focus */
+}
+
+.board-team.cleared .board-team-select {
+    opacity: 0.5;
+}
+
+.board-cleared-btn {
+    flex-shrink: 0;
+    min-width: 92px;
+    border: 1px solid #22324a;
+    border-radius: 8px;
+    padding: 10px 8px;
+
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.board-cleared-btn.on {
+    background: rgba(102,187,106,0.15);
+    border-color: #2e5c3a;
+    color: var(--s-tier);
 }
