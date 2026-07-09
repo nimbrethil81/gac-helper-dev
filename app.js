@@ -547,8 +547,9 @@ function buildReverseIndex() {
 
 function classifyBaseIds(baseIds, opts) {
     const wantTypes = (opts && opts.unitTypes) || ["CHARACTER"];
-    const ownedCharacterIds = [];
-    const ignoredKnown = [];   // recognised, but a type we don't import yet (ships)
+    const ownedUnitIds = [];
+    const counts = { CHARACTER: 0, SHIP: 0, CAPITAL_SHIP: 0 };
+    const ignoredKnown = [];   // recognised, but a unit type we're not importing here
     const unknown = [];        // not in the registry / no mapping yet
     const seen = new Set();
 
@@ -561,13 +562,14 @@ function classifyBaseIds(baseIds, opts) {
         if (!hit) { unknown.push(key); return; }
 
         if (wantTypes.includes(hit.unitType)) {
-            ownedCharacterIds.push(hit.characterId);
+            ownedUnitIds.push(hit.characterId);
+            if (counts[hit.unitType] !== undefined) counts[hit.unitType]++;
         } else {
             ignoredKnown.push(key);
         }
     });
 
-    return { ownedCharacterIds, ignoredKnown, unknown };
+    return { ownedUnitIds, counts, ignoredKnown, unknown };
 }
 
 function sameSet(a, b) {
@@ -604,11 +606,12 @@ function apiErrorMessage(error) {
     }
 }
 
-function buildImportSummary(n, ignored, unknown) {
-    const parts = [`Imported ${n} character${n === 1 ? "" : "s"} from the game.`];
-    if (ignored) parts.push(`${ignored} ship${ignored === 1 ? "" : "s"} ignored.`);
-    if (unknown) parts.push(`${unknown} unit${unknown === 1 ? "" : "s"} not in the app's database yet — they won't affect counters.`);
-    return parts.join(" ");
+function buildImportSummary(counts, unknown) {
+    const ch = counts.CHARACTER || 0;
+    const sh = (counts.SHIP || 0) + (counts.CAPITAL_SHIP || 0);
+    let summary = `Imported ${ch} character${ch === 1 ? "" : "s"} and ${sh} ship${sh === 1 ? "" : "s"} from the game.`;
+    if (unknown) summary += ` ${unknown} unit${unknown === 1 ? "" : "s"} not in the app's database yet — they won't affect counters.`;
+    return summary;
 }
 
 async function importFromAllyCode() {
@@ -661,12 +664,12 @@ async function importFromAllyCode() {
         return;
     }
 
-    const { ownedCharacterIds, ignoredKnown, unknown } =
-        classifyBaseIds(data.ownedBaseIds, { unitTypes: ["CHARACTER"] });
+    const { ownedUnitIds, counts, unknown } =
+        classifyBaseIds(data.ownedBaseIds, { unitTypes: ["CHARACTER", "SHIP", "CAPITAL_SHIP"] });
 
-    if (ownedCharacterIds.length === 0) {
+    if (ownedUnitIds.length === 0) {
         rosterMessage = {
-            text: "We loaded your account, but none of your characters are mapped in the app yet, so nothing was imported.",
+            text: "We loaded your account, but none of your units are mapped in the app yet, so nothing was imported.",
             kind: "error"
         };
         render();
@@ -674,14 +677,14 @@ async function importFromAllyCode() {
     }
 
     rosterBackup = { owned: ownedCharacters.slice(), meta: { ...rosterMeta } };
-    applyRoster(ownedCharacterIds, ROSTER_SOURCE_API, {
+    applyRoster(ownedUnitIds, ROSTER_SOURCE_API, {
         allyCode: data.allyCode || allyCode,
         syncedAt: data.syncedAt || new Date().toISOString()
     });
     allyCodeDraft = "";
 
     rosterMessage = {
-        text: buildImportSummary(ownedCharacterIds.length, ignoredKnown.length, unknown.length),
+        text: buildImportSummary(counts, unknown.length),
         kind: unknown.length ? "warn" : "ok"
     };
     render();
@@ -701,15 +704,15 @@ async function maybeBackgroundSync() {
         if (!data || !data.ok) return;            // silent: stay on cache
         if (currentView === "roster") return;     // user navigated in-flight: abandon
 
-        const { ownedCharacterIds } =
-            classifyBaseIds(data.ownedBaseIds, { unitTypes: ["CHARACTER"] });
-        if (ownedCharacterIds.length === 0) return; // don't wipe a good cache on a bad map
+        const { ownedUnitIds } =
+            classifyBaseIds(data.ownedBaseIds, { unitTypes: ["CHARACTER", "SHIP", "CAPITAL_SHIP"] });
+        if (ownedUnitIds.length === 0) return; // don't wipe a good cache on a bad map
 
-        const changed = !sameSet(ownedCharacterIds, ownedCharacters);
+        const changed = !sameSet(ownedUnitIds, ownedCharacters);
         if (changed) {
             rosterBackup = { owned: ownedCharacters.slice(), meta: { ...rosterMeta } };
         }
-        applyRoster(ownedCharacterIds, ROSTER_SOURCE_API, {
+        applyRoster(ownedUnitIds, ROSTER_SOURCE_API, {
             allyCode: data.allyCode || rosterMeta.allyCode,
             syncedAt: data.syncedAt || new Date().toISOString()
         });
@@ -727,12 +730,18 @@ function getCharacterName(characterId) {
     return def.name || characterId;
 }
 
-function getCharacterList() {
+// Unit lists for the roster screen. Each item carries unitType so the roster
+// row can badge capital ships. Ships and capital ships share one list, matching
+// how the game groups them; the badge is the only visual distinction.
+function getUnitList(types) {
     return Object.entries(characterDefinitions)
-        .filter(([, def]) => def.unitType === "CHARACTER")
-        .map(([id, def]) => ({ id, name: def.name }))
+        .filter(([, def]) => types.includes(def.unitType))
+        .map(([id, def]) => ({ id, name: def.name, unitType: def.unitType }))
         .sort((a, b) => a.name.localeCompare(b.name));
 }
+
+function getCharacterUnits() { return getUnitList(["CHARACTER"]); }
+function getShipUnits()      { return getUnitList(["SHIP", "CAPITAL_SHIP"]); }
 
 function getTierColour(tier) {
     switch ((tier || "").toUpperCase()) {
@@ -1296,14 +1305,6 @@ function recomputeBannerReadouts() {
 
 function renderRoster() {
 
-    const allCharacters = getCharacterList();
-
-    const filtered = allCharacters.filter(c =>
-        c.name.toLowerCase().includes(rosterSearch.toLowerCase())
-    );
-
-    const ownedCount = allCharacters.filter(c => ownedCharacters.includes(c.id)).length;
-
     const isApi = rosterMeta.source === ROSTER_SOURCE_API && rosterMeta.allyCode;
     const freshLine = isApi
         ? `Last synced: ${rosterMeta.syncedAt ? formatSavedAt(rosterMeta.syncedAt) : "never"}`
@@ -1314,7 +1315,7 @@ function renderRoster() {
     return `
 <div class="round-card">
     <div class="round-title">👤 MY ROSTER</div>
-    <div class="round-stat">${ownedCount} / ${allCharacters.length} characters owned</div>
+    <div class="round-stat">${rosterOwnedStatText()}</div>
     <div class="roster-saved-line">${freshLine}</div>
 </div>
 
@@ -1324,17 +1325,57 @@ ${renderRosterNotice()}
 <input
     type="text"
     class="search-box"
-    placeholder="Search characters..."
+    placeholder="Search characters and ships..."
     value="${rosterSearch}"
     oninput="updateRosterSearch(this.value)"
 >
 
 ${renderRosterDataPanel()}
 
-<div class="roster-list">
-    ${filtered.map(renderRosterRow).join("")}
-</div>
+<div id="rosterGroups">${renderRosterGroups()}</div>
 `;
+}
+
+// The owned-count line. Ships are only mentioned once ship data is present, so
+// rosters cached before ship support look exactly as they did before.
+function rosterOwnedStatText() {
+    const characters = getCharacterUnits();
+    const ships = getShipUnits();
+    const ownedChar = characters.filter(c => ownedCharacters.includes(c.id)).length;
+    const charText = `${ownedChar} / ${characters.length} characters owned`;
+    if (ships.length === 0) return charText;
+    const ownedShip = ships.filter(s => ownedCharacters.includes(s.id)).length;
+    return `${ownedChar} / ${characters.length} characters · ${ownedShip} / ${ships.length} ships owned`;
+}
+
+// Characters and Ships as two stacked sections, both filtered by the single
+// search box. While searching, a section with no matches is hidden; if nothing
+// matches at all, a single empty line is shown.
+function renderRosterGroups() {
+    const q = rosterSearch.toLowerCase();
+    const searching = q.length > 0;
+
+    const characters = getCharacterUnits().filter(c => c.name.toLowerCase().includes(q));
+    const allShips = getShipUnits();
+    const ships = allShips.filter(s => s.name.toLowerCase().includes(q));
+
+    if (searching && characters.length === 0 && ships.length === 0) {
+        return `<div class="roster-empty">No units match your search.</div>`;
+    }
+
+    let html = "";
+
+    if (!searching || characters.length) {
+        html += `<div class="roster-section-heading">Characters</div>`;
+        html += `<div class="roster-list">${characters.map(renderRosterRow).join("")}</div>`;
+    }
+
+    if (allShips.length && (!searching || ships.length)) {
+        html += `<div class="roster-section-heading">Ships</div>`;
+        html += `<div class="roster-list">${ships.map(renderRosterRow).join("")}</div>`;
+    }
+
+    return html;
 }
 
 function renderRosterImportCard() {
@@ -1382,9 +1423,12 @@ function renderRosterNotice() {
 
 function renderRosterRow(c) {
     const owned = ownedCharacters.includes(c.id);
+    const badge = c.unitType === "CAPITAL_SHIP"
+        ? `<span class="roster-badge">Capital</span>`
+        : "";
     return `
 <div class="roster-row ${owned ? "owned" : ""}" onclick="toggleOwned('${c.id}')">
-    <span class="roster-name">${c.name}</span>
+    <span class="roster-name">${c.name}${badge}</span>
     <span class="roster-status">${owned ? "✅" : "➕"}</span>
 </div>
 `;
@@ -1429,16 +1473,9 @@ function toggleRosterPanel() {
 
 function updateRosterSearch(value) {
     rosterSearch = value;
-    const app = document.getElementById("app");
-    const rosterList = app.querySelector(".roster-list");
-    if (!rosterList) return;
-
-    const allCharacters = getCharacterList();
-    const filtered = allCharacters.filter(c =>
-        c.name.toLowerCase().includes(value.toLowerCase())
-    );
-
-    rosterList.innerHTML = filtered.map(renderRosterRow).join("");
+    const groups = document.getElementById("rosterGroups");
+    if (!groups) return;
+    groups.innerHTML = renderRosterGroups();
 }
 
 function toggleOwned(characterId) {
@@ -1456,13 +1493,11 @@ function toggleOwned(characterId) {
 function updateRosterStat() {
     const stat = document.querySelector(".round-stat");
     if (!stat) return;
-    const allCharacters = getCharacterList();
-    const ownedCount = allCharacters.filter(c => ownedCharacters.includes(c.id)).length;
-    stat.textContent = `${ownedCount} / ${allCharacters.length} characters owned`;
+    stat.textContent = rosterOwnedStatText();
 }
 
 function clearRoster() {
-    const confirmed = confirm("Clear all owned characters? In SWGOH you rarely lose characters, so this is mainly for starting over.");
+    const confirmed = confirm("Clear all owned units? In SWGOH you rarely lose characters or ships, so this is mainly for starting over.");
     if (!confirmed) return;
     ownedCharacters = [];
     rosterMeta.allyCode = null;
@@ -1498,7 +1533,7 @@ async function exportRoster() {
     try {
         await navigator.clipboard.writeText(text);
         rosterMessage = {
-            text: `Copied ${ownedCharacters.length} characters to the clipboard. Paste it somewhere safe.`,
+            text: `Copied ${ownedCharacters.length} units to the clipboard. Paste it somewhere safe.`,
             kind: "ok"
         };
         render();
@@ -1560,13 +1595,18 @@ function importRoster() {
     const known = [];
     const skipped = [];
     const seen = new Set();
+    let chCount = 0;
+    let shCount = 0;
 
     incoming.forEach(id => {
         if (typeof id !== "string") { skipped.push(String(id)); return; }
         if (seen.has(id)) return;
         seen.add(id);
-        if (characterDefinitions[id] && characterDefinitions[id].unitType === "CHARACTER") {
+        const def = characterDefinitions[id];
+        const type = def && def.unitType;
+        if (type === "CHARACTER" || type === "SHIP" || type === "CAPITAL_SHIP") {
             known.push(id);
+            if (type === "CHARACTER") chCount++; else shCount++;
         } else {
             skipped.push(id);
         }
@@ -1574,7 +1614,7 @@ function importRoster() {
 
     if (known.length === 0) {
         rosterMessage = {
-            text: "None of those characters were recognised. Nothing was imported.",
+            text: "None of those units were recognised. Nothing was imported.",
             kind: "error"
         };
         render();
@@ -1587,10 +1627,9 @@ function importRoster() {
     applyRoster(known, importSource);   // note: does not adopt a pasted allyCode
 
     importDraft = "";
+    const base = `Imported ${chCount} character${chCount === 1 ? "" : "s"} and ${shCount} ship${shCount === 1 ? "" : "s"}.`;
     rosterMessage = {
-        text: skipped.length
-            ? `Imported ${known.length} characters. Skipped ${skipped.length} unrecognised.`
-            : `Imported ${known.length} characters.`,
+        text: skipped.length ? `${base} Skipped ${skipped.length} unrecognised.` : base,
         kind: skipped.length ? "warn" : "ok"
     };
     render();
