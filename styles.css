@@ -143,6 +143,13 @@ body {
         0 0 15px rgba(79,195,247,0.5);
 }
 
+/* Format chooser reuses the mode-toggle look, but sits inside the setup card,
+   so it needs a lighter track to stand out and no extra margin (the card gaps). */
+.board-format-choice {
+    background: var(--panel-light);
+    margin-bottom: 0;
+}
+
 /* ─── SEARCH / SELECT ────────────────────────────────────────────── */
 
 .search-box,

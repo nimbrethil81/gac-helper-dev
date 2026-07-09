@@ -14,6 +14,7 @@ const ROSTER_SYNC_STALE_MS = 1000 * 60 * 60 * 12; // background sync only if old
 const BOARD_SCHEMA = 1;
 const BOARD_KEY = "boardData";               // versioned board object
 const LEAGUE_KEY = "gacLeague";              // persisted user setting
+const LAST_SQUAD_MODE_KEY = "gacLastSquadMode"; // remembers 5v5/3v3 while browsing Fleet
 const LEAGUES = ["KYBER", "AURODIUM", "CHROMIUM", "BRONZIUM", "CARBONITE"];
 const NOT_IN_CATALOGUE = "__NOT_IN_CATALOGUE__";
 const TERRITORY_LABELS = {
@@ -30,6 +31,8 @@ let boardConfig = {};                   // league -> mode -> [{territory, type, 
 let scoringRules = [];                  // GAC banner economy rows (consumed in Item 2)
 let baseIdToUnit = {};                  // base_id -> { characterId, unitType }
 let currentMode = "5v5";
+let lastSquadMode = localStorage.getItem(LAST_SQUAD_MODE_KEY) || "5v5"; // last 5v5/3v3 chosen; used for board setup when the toggle is on Fleet
+let boardModeDraft = null;              // squad format picked on the setup card while the toggle is on Fleet
 let currentView = "counters";
 let usedTeams = JSON.parse(localStorage.getItem("usedTeams") || "[]");
 let searchText = "";
@@ -167,6 +170,7 @@ function saveBoard() {
 
 function discardBoard() {
     board = null;
+    boardModeDraft = null;
     localStorage.removeItem(BOARD_KEY);
 }
 
@@ -181,9 +185,24 @@ function setLeague(value) {
     render();
 }
 
+// The opponent board is always a squad-format board (5v5 or 3v3) plus the fleet
+// territory. "Fleet" is a browsing view on the Counters screen, never a whole-
+// board format — so when the toggle is on Fleet, the board takes the squad
+// format chosen on the setup card, falling back to the last squad format used.
+function boardMode() {
+    if (currentMode !== "FLEET") return currentMode;
+    return boardModeDraft || lastSquadMode;
+}
+
+function setBoardModeDraft(mode) {
+    boardModeDraft = mode;
+    render();
+}
+
 function createBoard() {
     const league = leagueDraft;
-    const cfg = boardConfig[league] && boardConfig[league][currentMode];
+    const mode = boardMode();
+    const cfg = boardConfig[league] && boardConfig[league][mode];
 
     if (!league || !cfg || cfg.length === 0) {
         alert("Choose a league first. If a league is selected and this still fails, the board configuration hasn't loaded — check your connection and refresh.");
@@ -201,11 +220,12 @@ function createBoard() {
     board = {
         schema:      BOARD_SCHEMA,
         league:      league,
-        mode:        currentMode,          // frozen for the round
+        mode:        mode,                 // frozen for the round (always 5v5 or 3v3)
         createdAt:   new Date().toISOString(),
         territories: cfg.map(t => ({ territory: t.territory, type: t.type, teamCount: t.teamCount })),
         teams:       teams
     };
+    boardModeDraft = null;
     saveBoard();
     render();
 }
@@ -843,11 +863,13 @@ ${viewHtml}
 
 function renderCounters() {
 
+    const modeHasData = Object.keys(gacData[currentMode] || {}).length > 0;
+
     const teams = Object.keys(gacData[currentMode] || {})
         .filter(team => team.toLowerCase().includes(searchText.toLowerCase()))
         .sort((a, b) => a.localeCompare(b));
 
-    return `
+    const header = `
 <div class="round-card">
     <div class="round-title">🏆 CURRENT ROUND</div>
     <div class="round-stat">Used Teams: ${getUsedTeamCount()}</div>
@@ -855,10 +877,22 @@ function renderCounters() {
 </div>
 
 <div class="mode-toggle">
-    <button class="mode-button ${currentMode === "5v5" ? "active" : ""}" onclick="setMode('5v5')">5v5</button>
-    <button class="mode-button ${currentMode === "3v3" ? "active" : ""}" onclick="setMode('3v3')">3v3</button>
+    <button class="mode-button ${currentMode === "5v5"   ? "active" : ""}" onclick="setMode('5v5')">5v5</button>
+    <button class="mode-button ${currentMode === "3v3"   ? "active" : ""}" onclick="setMode('3v3')">3v3</button>
+    <button class="mode-button ${currentMode === "FLEET" ? "active" : ""}" onclick="setMode('FLEET')">Fleet</button>
 </div>
+`;
 
+    // A mode with no counter data yet (Fleet, until fleet counters are authored)
+    // shows a plain message instead of an empty dropdown and blank results.
+    if (!modeHasData) {
+        const emptyMsg = currentMode === "FLEET"
+            ? "No fleet counters have been added yet. Once fleet data is in the sheet, your fleet counters will appear here."
+            : "No defence teams found for this mode yet.";
+        return header + `<div class="empty-state">${emptyMsg}</div>`;
+    }
+
+    return header + `
 <input
     type="text"
     id="searchBox"
@@ -895,6 +929,10 @@ function setCounterFilter(filter) {
 
 function setMode(mode) {
     currentMode = mode;
+    if (mode === "5v5" || mode === "3v3") {
+        lastSquadMode = mode;
+        localStorage.setItem(LAST_SQUAD_MODE_KEY, mode);
+    }
     render();
 }
 
@@ -902,6 +940,8 @@ function updateSearch(value) {
     searchText = value;
 
     const teamSelect = document.getElementById("teamSelect");
+    if (!teamSelect) return;
+
     const teams = Object.keys(gacData[currentMode] || {})
         .filter(team => team.toLowerCase().includes(searchText.toLowerCase()))
         .sort((a, b) => a.localeCompare(b));
@@ -1091,13 +1131,30 @@ function renderBoardSetup() {
         ? `<div class="roster-msg roster-msg-warn">Board configuration hasn't loaded yet — check your connection and refresh.</div>`
         : "";
 
+    const fmt = boardMode();
+
+    // On Fleet, "Fleet" isn't a whole-board format, so the setup card lets the
+    // player pick the squad format for this board. On 5v5/3v3 it's inherited
+    // silently from the toggle, exactly as before.
+    const formatBlock = currentMode === "FLEET"
+        ? `
+    <div class="roster-import-helper">
+        Choose your league, then pick the match format for the squad territories.
+    </div>
+    <div class="mode-toggle board-format-choice">
+        <button class="mode-button ${fmt === "5v5" ? "active" : ""}" onclick="setBoardModeDraft('5v5')">5v5</button>
+        <button class="mode-button ${fmt === "3v3" ? "active" : ""}" onclick="setBoardModeDraft('3v3')">3v3</button>
+    </div>`
+        : `
+    <div class="roster-import-helper">
+        Choose your league, then set up the opponent's defence board for this round.
+        Format is taken from the Counters screen toggle — currently <strong>${fmt}</strong>.
+    </div>`;
+
     return `
 <div class="board-setup-card">
     <div class="roster-import-title">🗺️ SET UP OPPONENT BOARD</div>
-    <div class="roster-import-helper">
-        Choose your league, then set up the opponent's defence board for this round.
-        Format is taken from the Counters screen toggle — currently <strong>${currentMode}</strong>.
-    </div>
+    ${formatBlock}
     ${warning}
     <select class="team-select board-league-select" onchange="setLeague(this.value)">
         <option value="" ${!leagueDraft ? "selected" : ""}>Select league…</option>
