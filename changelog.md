@@ -139,3 +139,44 @@
   rendered unstyled.
 - **Copy fix:** the roster-overwrite confirmation dialog no longer names swgoh.gg by name,
   completing the source-neutral language pass that began with the Comlink migration.
+
+## v2.5 — Fleet Support
+Delivered in three phases within a single workstream; all three shipped together.
+
+- **Roster — Characters/Ships split (Phase 1):** the Roster screen now lists units in two
+  sections, **Characters** and **Ships**, with a dual owned-count ("X / Y characters ·
+  A / B ships owned"). Capital ships carry a small **Capital** badge within the Ships
+  section. A single search box filters both sections; sections with no matches are hidden
+  while searching, with a single empty line when nothing matches. If the loaded data has no
+  ship definitions (e.g. an older cached payload), the Ships section and its count are
+  omitted, so the screen is unchanged until ship data is present.
+- **Import widened to ships (Phase 1):** ally-code import, background sync, and paste import
+  now bring in `CHARACTER`, `SHIP`, and `CAPITAL_SHIP` units together (previously ships were
+  recognised but dropped). `classifyBaseIds` returns owned unit ids plus per-type counts; the
+  import summary now reads "Imported X characters and Y ships from the game," retaining the
+  "units not in the app's database yet" note. Export/clear copy generalised from
+  "characters" to "units".
+- **Counters — Fleet toggle (Phase 2):** a third **Fleet** segment joins `5v5` / `3v3`.
+  A mode with no counter data (Fleet, until fleet counters are authored) shows a plain
+  "no fleet counters yet" message instead of an empty dropdown. `lastSquadMode` is persisted
+  whenever a squad format is selected.
+- **Board setup — format safety (Phase 2, Option A):** because "Fleet" is a browsing view,
+  not a whole-board format, the board setup card shows a small `5v5` / `3v3` chooser (seeded
+  from `lastSquadMode`) when the Counters toggle is on Fleet, so the board always freezes a
+  valid squad format. On 5v5/3v3 the format is inherited silently as before. `boardMode()`
+  resolves the effective squad format; `createBoard()` freezes it into the board.
+- **Round board — fleet territory (Phase 3):** **Back Top** (fleet) now unlocks once Front
+  Top is cleared, mirroring Back Bottom behind Front Bottom; the "arrives in v2.5" note is
+  gone. The fleet territory generates its own team rows, is marked with a 🚀 icon, and its
+  pickers draw from the `FLEET` catalogue rather than the squad catalogue.
+- **Allocation engine — fleet-aware (Phase 3):** the engine now runs against every unlocked
+  territory including fleet. Each team draws candidates from its own catalogue (per-team
+  `modeKey`); the shared ownership, used-state, and exclusivity logic is unchanged. Because
+  ships and characters are disjoint unit sets, fleet and squad allocations never collide,
+  while two fleet teams contesting the same owned ship are arbitrated correctly, and the
+  overlap notice fires for fleets as for squads.
+- **Board schema bump (1 → 2):** boards now include fleet-territory team rows. Any board
+  created before this release is discarded on load and set up afresh.
+- **Backend:** no Apps Script change required — the `FLEET` counters bucket falls out of the
+  existing mode-keyed loop once `Mode = FLEET` rows exist. `APP_VERSION` → 2.5; service-worker
+  cache bumped to v5 to force fresh assets for installed users.
