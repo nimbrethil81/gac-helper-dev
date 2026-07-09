@@ -11,7 +11,7 @@ const ROSTER_FETCH_TIMEOUT_MS = 60000;       // user-initiated import/refresh ti
 const ROSTER_SYNC_STALE_MS = 1000 * 60 * 60 * 12; // background sync only if older than this
 
 // Board (v2.1 Round screen)
-const BOARD_SCHEMA = 1;
+const BOARD_SCHEMA = 2;                       // v2: boards include fleet-territory team rows
 const BOARD_KEY = "boardData";               // versioned board object
 const LEAGUE_KEY = "gacLeague";              // persisted user setting
 const LAST_SQUAD_MODE_KEY = "gacLastSquadMode"; // remembers 5v5/3v3 while browsing Fleet
@@ -211,7 +211,6 @@ function createBoard() {
 
     const teams = [];
     cfg.forEach(t => {
-        if (t.type !== "SQUAD") return;   // fleet territory generates no team rows until v2.5
         for (let i = 0; i < t.teamCount; i++) {
             teams.push({ territory: t.territory, index: i, name: "", cleared: false });
         }
@@ -242,14 +241,20 @@ function isTerritoryCleared(territoryKey) {
 }
 
 // A back territory unlocks when the front territory in its lane is cleared.
-// Fleet territories are locked outright until v2.5.
+// This applies to Back Top (fleet) exactly as it does to Back Bottom (squad):
+// the fleet territory reveals once Front Top is cleared.
 function isTerritoryUnlocked(tDef) {
-    if (tDef.type === "FLEET") return false;
     if (tDef.territory.indexOf("BACK_") === 0) {
         const front = "FRONT_" + tDef.territory.slice(5);
         return isTerritoryCleared(front);
     }
     return true;
+}
+
+// Which counter catalogue a territory draws from: fleet territories use the
+// FLEET catalogue; squad territories use the board's frozen squad format.
+function territoryModeKey(tDef) {
+    return tDef.type === "FLEET" ? "FLEET" : board.mode;
 }
 
 // ─── BOARD ACTIONS ────────────────────────────────────────────────────────────
@@ -309,8 +314,9 @@ function buildEligibleTeams() {
     if (!board) return eligible;
 
     board.territories.forEach(tDef => {
-        if (tDef.type === "FLEET") return;
         if (!isTerritoryUnlocked(tDef)) return;
+
+        const modeKey = territoryModeKey(tDef);
 
         teamsInTerritory(tDef.territory).forEach(team => {
             if (team.cleared) return;
@@ -320,11 +326,11 @@ function buildEligibleTeams() {
 
             if (team.name === NOT_IN_CATALOGUE) {
                 eligible.push({ key, territory: tDef.territory, index: team.index,
-                                name: null, custom: true, candidates: [] });
+                                name: null, modeKey, custom: true, candidates: [] });
                 return;
             }
 
-            const all = (gacData[board.mode] && gacData[board.mode][team.name]) || [];
+            const all = (gacData[modeKey] && gacData[modeKey][team.name]) || [];
             const seen = new Set();
             const candidates = [];
             all.forEach(c => {
@@ -334,7 +340,7 @@ function buildEligibleTeams() {
             });
 
             eligible.push({ key, territory: tDef.territory, index: team.index,
-                            name: team.name, custom: false, candidates });
+                            name: team.name, modeKey, custom: false, candidates });
         });
     });
 
@@ -466,7 +472,7 @@ function buildReasons(eligible, assign) {
         // No assignment — explain why.
         let reason;
         if (t.candidates.length === 0) {
-            const all = (gacData[board.mode] && gacData[board.mode][t.name]) || [];
+            const all = (gacData[t.modeKey] && gacData[t.modeKey][t.name]) || [];
             if (all.length === 0) {
                 reason = "No counters in the catalogue for this team yet.";
             } else if (all.some(c => getOwnership(c.counterId).owned)) {
@@ -1186,18 +1192,9 @@ function renderBoard() {
 
 function renderTerritory(tDef) {
     const label = TERRITORY_LABELS[tDef.territory] || tDef.territory;
-
-    if (tDef.type === "FLEET") {
-        return `
-<div class="board-territory locked">
-    <div class="board-territory-header">
-        <span class="board-territory-title">🚀 ${label.toUpperCase()}</span>
-        <span class="board-territory-progress">${tDef.teamCount} fleet${tDef.teamCount === 1 ? "" : "s"}</span>
-    </div>
-    <div class="board-locked-note">Fleet territory — ship support arrives in v2.5.</div>
-</div>
-`;
-    }
+    const isFleet = tDef.type === "FLEET";
+    const icon = isFleet ? "🚀 " : "";
+    const unit = isFleet ? "fleet" : "team";
 
     if (!isTerritoryUnlocked(tDef)) {
         const frontLabel = TERRITORY_LABELS["FRONT_" + tDef.territory.slice(5)] || "the front territory";
@@ -1205,9 +1202,9 @@ function renderTerritory(tDef) {
 <div class="board-territory locked">
     <div class="board-territory-header">
         <span class="board-territory-title">🔒 ${label.toUpperCase()}</span>
-        <span class="board-territory-progress">${tDef.teamCount} team${tDef.teamCount === 1 ? "" : "s"}</span>
+        <span class="board-territory-progress">${tDef.teamCount} ${unit}${tDef.teamCount === 1 ? "" : "s"}</span>
     </div>
-    <div class="board-locked-note">Locked — clear ${frontLabel} to reveal these teams.</div>
+    <div class="board-locked-note">Locked — clear ${frontLabel} to reveal these ${unit}s.</div>
 </div>
 `;
     }
@@ -1223,20 +1220,22 @@ function renderTerritory(tDef) {
     return `
 <div class="board-territory">
     <div class="board-territory-header">
-        <span class="board-territory-title">${label.toUpperCase()}</span>
+        <span class="board-territory-title">${icon}${label.toUpperCase()}</span>
         <span class="board-territory-progress">${clearedCount}/${teams.length} cleared</span>
         ${clearBtn}
     </div>
-    ${teams.map(t => renderBoardTeamRow(tDef.territory, t)).join("")}
+    ${teams.map(t => renderBoardTeamRow(tDef, t)).join("")}
 </div>
 `;
 }
 
-function renderBoardTeamRow(territoryKey, team) {
-    const teamNames = Object.keys(gacData[board.mode] || {}).sort((a, b) => a.localeCompare(b));
+function renderBoardTeamRow(tDef, team) {
+    const territoryKey = tDef.territory;
+    const modeKey = territoryModeKey(tDef);
+    const teamNames = Object.keys(gacData[modeKey] || {}).sort((a, b) => a.localeCompare(b));
 
     const options = [
-        `<option value="" ${team.name === "" ? "selected" : ""}>Select team…</option>`,
+        `<option value="" ${team.name === "" ? "selected" : ""}>Select ${tDef.type === "FLEET" ? "fleet" : "team"}…</option>`,
         `<option value="${NOT_IN_CATALOGUE}" ${team.name === NOT_IN_CATALOGUE ? "selected" : ""}>Not in catalogue</option>`,
         ...teamNames.map(n => `<option value="${n}" ${team.name === n ? "selected" : ""}>${n}</option>`)
     ].join("");
