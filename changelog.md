@@ -234,3 +234,37 @@ workstream; all three shipped together.
 - **Data caveat:** points-to-win uses full-clean-clear best cases, consistent with the
   69-banner single-battle maximum. Fleet per-ship values and defeated-enemy counts remain
   earmarked for a real-battle spot-check before the efficiency calculator is built on them.
+
+## v2.7 — Can-I-Win Verdict
+A mathematical-winnability readout on the Round screen, answering "can I still win
+this round?" so the player can decide whether to try hard on the remaining battles
+or treat them as a playground for testing counters. Built entirely on the v2.6
+scoring engine — no new scoring data, and no dependency on the fleet/defeated-enemy
+spot-check, since it reads the same best-case remaining total the points-to-win
+readout already uses. This is the first half of what was roadmapped as the
+efficiency calculator; the undersize-squad optimiser is the still-outstanding half.
+
+- **Can-I-win verdict:** beneath the points-to-win readout, a "Can I still win this
+  round?" panel weighs the player's ceiling — current score plus best-case remaining
+  a flawless finish could bank — against the opponent's score. Three states:
+  **Can't win this round** (a flawless finish still falls short; time to experiment),
+  **Already won** (current score alone is unbeatable), and **Winnable** (the
+  actionable middle). Headline is colour-coded — green won, red lost, neutral
+  winnable — and recomputes live as scores are typed.
+- **Opponent final-score marker:** the opponent-score field gains a "Mark as their
+  final score" link. Unmarked (the default), the number is their *current* score — a
+  floor that may still rise — and the winnable verdict states a **breakeven** ("you
+  can reach at most X; you win only if they finish on X or below") rather than
+  claiming a guaranteed win. Marked final, the field relabels to "Opponent's final
+  score", the points-to-win "their score will rise" caveat is suppressed, and the
+  verdict gives a clean yes/no. A link reverts to treating it as a current score.
+  Same override shape as the v2.6 remaining-banners field. Persisted as
+  `bannerData.oppFinal`; defaults to false and is reset by Reset Round.
+- **Verdict-pairing correctness:** "Can't win" compares the opponent against the
+  player's *ceiling* (never their current score, so being behind now never triggers
+  a false "lost"); "Already won" compares the opponent's *final* against the player's
+  *current* score, and is asserted only when the opponent score is marked final. A
+  lead over a not-yet-final score yields a breakeven, never a guaranteed win.
+- **Frontend:** `APP_VERSION` -> 2.7; service-worker cache bumped to `swgoh-cache-v8`
+  to force fresh `app.js` and `styles.css` for installed users. No Apps Script or
+  sheet change.

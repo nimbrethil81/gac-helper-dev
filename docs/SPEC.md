@@ -29,6 +29,7 @@ A mobile-first Progressive Web App that helps players make faster, better Grand 
    - 6.7 [Opponent Board](#67-opponent-board)
    - 6.8 [Allocation Engine](#68-allocation-engine)
    - 6.9 [Points to Win](#69-points-to-win)
+   - 6.10 [Can I Still Win?](#610-can-i-still-win)
 7. [Roster Model](#7-roster-model)
 8. [Roadmap](#8-roadmap)
 9. [Success Criteria](#9-success-criteria)
@@ -306,6 +307,8 @@ From v2.1, banner tracking lives on the Round screen alongside the opponent boar
 
 **Calculated remaining (v2.6).** The remaining-banners figure is derived by walking every uncleared team on the opponent board and applying the GAC_Scoring rules — victory, the attempt bonus keyed to each team's Battles count (see [§6.7](#67-opponent-board)), per-unit survival/full-health/full-protection bonuses, defeated-enemy points, and per-territory clear bonuses — to produce the most that could still be banked with a clean finish (see [§6.9](#69-points-to-win) for the scoring engine detail). The field remains **overridable**: typing a value sets a manual override, shown with an amber marker and a "Use calculated" link to dismiss it. Any change to the board (clearing or un-clearing a team, adjusting a Battles count, setting a team) discards the override and restores the live calculated figure, so a stale hand-typed value can never silently persist. When no board exists the field reads zero and invites either board setup or a typed value. Reset Round and the empty-board state both leave the field on the calculated (no-override) state; earlier stored numeric `remaining` values migrate to no-override on load.
 
+**Opponent final-score marker (v2.7).** The opponent-score field carries a marker for whether the entered number is their **final** score or just their **current** one (the default). It is stored as `bannerData.oppFinal` and drives the "can I still win?" verdict (see [§6.10](#610-can-i-still-win)): a final score lets that verdict give a clean yes/no, whereas a current score is treated as a floor that may still rise. Marking the score final also relabels the field ("Opponent's final score") and suppresses the points-to-win "their score will rise" caveat, which no longer applies. The marker uses the same override shape as the remaining field — a visible state with a link to revert. It defaults to *not final* and is reset by Reset Round.
+
 The projected final remains an optimistic ceiling, not a win/lose prediction: the opponent's remaining offence against the player's own defence is not yet modelled, so the opponent's score stays whatever the player has entered. Modelling that is the planned **My Board** feature (see [§8](#8-roadmap)); the scoring engine is written side-agnostically so it will slot in without rework. Banner state is stored locally and cleared by Reset Round.
 
 ### 6.4 Roster Management
@@ -430,6 +433,18 @@ Introduced in v2.6, this feature answers "how many banners do I still need to wi
 
 **Data caveat.** Points-to-win uses full-clean-clear best cases, consistent with the documented 69-banner single-battle maximum. The fleet per-ship and defeated-enemy values remain earmarked for a real-battle spot-check before the efficiency calculator is built on them; the points-to-win figure itself is unaffected, since it uses the full-clear best case.
 
+### 6.10 Can I Still Win?
+
+Introduced in v2.7, this verdict answers whether the round is still mathematically winnable, so the player can decide whether to fight hard for the remaining battles or treat them as a playground for testing counters. It sits beneath the points-to-win readout and is pure presentation over numbers the v2.6 engine already produces — it needs no new scoring data and does not depend on the fleet/defeated-enemy spot-check, since it reads the same best-case remaining total.
+
+**The comparison.** The player's **ceiling** — current score plus the best-case remaining a flawless finish could bank (see [§6.9](#69-points-to-win)) — is weighed against the opponent's score. Two pairings matter, and they are deliberately distinct:
+- **"Can't win"** compares the opponent's score against the player's *ceiling*, never against their current score. Being behind now is not being mathematically beaten; only a ceiling that cannot reach the opponent's score is. This holds whether or not the opponent's score is final — if it is merely their current score, a ceiling already below it can only fall further behind.
+- **"Already won"** compares the opponent's score against the player's *current* score, and is asserted only when the opponent's score is marked final (see [§6.3](#63-banner-tracking)). A present lead over a score that may still rise is not yet unbeatable.
+
+**The three states.** **Can't win this round** (the flawless-finish ceiling still falls short — time to experiment), **Already won** (current score alone is past their final), and **Winnable** (the actionable middle). The headline is colour-coded: green won, red lost, neutral winnable. The verdict recomputes live as scores are typed.
+
+**Honesty without My Board.** Because the opponent's own remaining offence is not modelled until My Board exists (see [§8](#8-roadmap)), the verdict cannot turn "winnable" into a guaranteed yes when the opponent's score is only their current total. In that case it states a **breakeven** — "you can reach at most X; you win only if they finish on X or below" — handing the player the number to judge against how much the opponent could still take off their defence. When the opponent's score is marked final, this uncertainty is gone and the verdict is a clean yes/no.
+
 ---
 
 ## 7. Roster Model
@@ -481,8 +496,11 @@ Board-aware, mode-aware "how many banners do I need to win" maths, on the GAC_Sc
 **My Board — opponent's remaining offence** · *Planned, seam-ready*
 Points-to-win currently models only the player's own remaining offence; the opponent's score is hand-entered and static. My Board adds a second board representing the player's own defence, so the same side-agnostic walker can project the opponent's best-case remaining banners against it and turn points-to-win into a full two-sided prediction. The v2.6 engine was built for this: the walker takes any board, the Battles/attempts count lives generically on a board team, and the banner model reserves room for an opponent-remaining figure — so this is additive, not a rework. Would also add a **Setting Defence** scoring row (banked at round start against the player's own defence).
 
-**Efficiency calculator** · *Planned*
-The final-battle "can I win with fewer than a full squad?" tool: trading per-unit surviving/full-health/full-protection bonuses against the higher per-slot unused-slot bonus when the units sent retain 100% health, including the deliberate-undersize fleet case (empty reinforcement slots). Depends on the `UNUSED_SLOTS_MAX` data and, critically, a real-battle spot-check of the scoring values — particularly fleet per-ship bonuses and the defeated-enemy count — before players lean on its numbers mid-match.
+**v2.7 — Can-I-Win Verdict** · *Complete*
+The first half of the roadmapped efficiency calculator: a mathematical-winnability readout (see [§6.10](#610-can-i-still-win)) that weighs the player's ceiling against the opponent's score, with an opponent final-score marker so the verdict can give a clean yes/no when the opponent has finished, or a breakeven when their score may still rise. Pure presentation over the v2.6 engine — no new scoring data, no dependency on the fleet/defeated-enemy spot-check.
+
+**Efficiency calculator — undersize optimiser** · *Planned*
+The remaining, harder half of the efficiency calculator: the final-battle "can I win with fewer than a full squad?" tool, trading per-unit surviving/full-health/full-protection bonuses against the higher per-slot unused-slot bonus when the units sent retain 100% health, including the deliberate-undersize fleet case (empty reinforcement slots). Depends on the `UNUSED_SLOTS_MAX` data and, critically, a real-battle spot-check of the scoring values — particularly fleet per-ship bonuses and the defeated-enemy count — before players lean on its numbers mid-match. This is the piece the v2.7 winnability verdict deliberately did *not* need, precisely because it sidesteps the unverified per-unit values.
 
 **Option B — Banners-first allocation scoring** · *Deferred alternative*
 The v2.1 allocation engine uses coverage → tier → banner score as its lexicographic objective (Option A). A possible iteration is Option B: maximise total expected banners across the plan directly, letting coverage fall out naturally (an uncovered team contributes zero). This would produce subtler assignments — e.g. accepting a slightly weaker cover on one team to leave a stronger counter free for a harder one — at the cost of the current explicit "cover as many teams as possible" behaviour. Deferred until real-play feedback indicates whether the coverage-first heuristic produces visibly wasteful assignments; if it does, this is the intended iteration.
@@ -511,6 +529,6 @@ A user should be able to:
 
 ## 10. Future Vision
 
-The long-term direction is a roster-aware GAC planning assistant. With v2.1 the app crossed from *catalogue lookup* into *board-aware allocation*; v2.5 brought fleet combat inside the same model, so the board and the allocation engine now cover a full GAC round; v2.6 added explicit points-to-win maths on top, modelling the player's own remaining offence. The next steps build directly on that engine: **My Board** extends the same side-agnostic walker to the opponent's remaining offence for a two-sided prediction, and an **efficiency calculator** adds the undersize-squad maths for the final battle. Beyond that, potential future capabilities include opponent-roster analysis, statistical counter recommendations, and (subject to feasibility) automated board setup from live match data.
+The long-term direction is a roster-aware GAC planning assistant. With v2.1 the app crossed from *catalogue lookup* into *board-aware allocation*; v2.5 brought fleet combat inside the same model, so the board and the allocation engine now cover a full GAC round; v2.6 added explicit points-to-win maths on top, modelling the player's own remaining offence; and v2.7 turned that into a mathematical-winnability verdict for deciding when a round is worth fighting. The next steps build directly on that engine: **My Board** extends the same side-agnostic walker to the opponent's remaining offence for a two-sided prediction, and the **undersize optimiser** — the remaining half of the efficiency calculator — adds the fewer-than-a-full-squad maths for the final battle, once the scoring values are spot-checked against real play. Beyond that, potential future capabilities include opponent-roster analysis, statistical counter recommendations, and (subject to feasibility) automated board setup from live match data.
 
 Throughout, the app should continue to prioritise simplicity and speed. The goal is a personal SWGOH Grand Arena strategist — not a reimplementation of SWGOH.gg.
