@@ -268,3 +268,46 @@ efficiency calculator; the undersize-squad optimiser is the still-outstanding ha
 - **Frontend:** `APP_VERSION` -> 2.7; service-worker cache bumped to `swgoh-cache-v8`
   to force fresh `app.js` and `styles.css` for installed users. No Apps Script or
   sheet change.
+
+## v2.8 — Undersize Optimiser
+Surfaces undersize opportunities on the recommendation and lookup cards, so the
+banner payoff of dropping units is visible during a round without any mid-match
+calculation. Leans entirely on hand-authored catalogue values, so it needs no new
+scoring data and does not depend on the fleet/defeated-enemy spot-check.
+
+- **Droppable-count column:** the Counters sheet's `Undersize` column changes from
+  `Yes`/`No` to a numeric **droppable-unit count** — the maximum units a counter can
+  drop from a full squad and still win cleanly (`0` = full squad). Each unit dropped
+  nets **+1 banner** over a full clean clear (the +4 unused-slot bonus minus the 3
+  forgone surviving/full-health/full-protection bonuses), so a count of N is worth up
+  to +N banners.
+- **Banner-score rebasing:** the `Banner Score` column now holds the **full-squad,
+  first-attempt, clean-clear** value with the undersize premium removed, so score and
+  count own non-overlapping parts of a counter's value and can be added without
+  double-counting. The app reconstructs the undersize total as `Banner Score` + count.
+  A companion `SCORING_REFERENCE.md` documents the per-mode ceilings (5v5 → 65,
+  3v3 → 57, fleet → 73) and meaning ladders used to author scores.
+- **Undersize display — recommendation card:** when the allocation engine recommends
+  a counter with a droppable count > 0, a new line shows the reconstructed total most
+  prominently, then the drop count and bonus — e.g. "67 banners if you undersize ·
+  drop up to 2 for +2". Counters with count 0 show no undersize line; the card is
+  unchanged from before.
+- **Undersize display — lookup card:** the counter lookup card's old "Undersize:
+  Yes/No" becomes "drop up to N -> X banners (+N)", or "full squad" when the count is
+  0. Both screens share one `undersizeInfo` helper so the payoff maths is defined once.
+- **Backend:** the Apps Script parses the `Undersize` cell to a number
+  (`parseUndersize`); any non-numeric value — a legacy `Yes`/`No` string on an
+  un-migrated row, or a blank — resolves to 0. The app applies the same fallback, so a
+  partially-migrated sheet is always safe: an un-migrated row simply carries no
+  undersize advice rather than a wrong number, and advice appears row-by-row as the
+  data is completed. A new column right of `Banner Score` needs no code change — the
+  Apps Script reads the Counters tab by header name, ignoring columns it doesn't name.
+- **Fleet unit-count correction:** the SWGOH Wiki "Fleet Max Banners" table confirmed
+  fleet is a **7**-unit format (capital + 6), not the 8 assumed when the v2.6 two-count
+  model was specced. A flawless first-attempt 7-ship win banks 73. The points-to-win
+  engine's fleet fallback (`ownUnitCount` / `enemyUnitCount`) should be corrected from
+  8 to 7, and the `GAC_Scoring` sheet's fleet `OWN_UNITS` / `ENEMY_UNITS` rows (if
+  added) set to 7. This affects the points-to-win *fleet* best-case only; the undersize
+  display and banner-score column do not depend on it.
+- **Frontend:** `APP_VERSION` -> 2.8; service-worker cache bumped to `swgoh-cache-v9`
+  to force fresh `app.js` and `styles.css` for installed users.
