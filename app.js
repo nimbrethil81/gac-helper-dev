@@ -1,5 +1,5 @@
 // app.js
-const APP_VERSION = "2.8";
+const APP_VERSION = "2.9";
 const API_URL = "https://script.google.com/macros/s/AKfycbwSg1axISAAWN2AIMq5U6suLdj9yrfgeT1h2Nys_NT2M0D-9NA-xJ8YVKKMLKKiDcKMdA/exec";
 
 const ROSTER_SCHEMA = 2;
@@ -590,7 +590,11 @@ function solveAllocation(teams) {
         const cands = t.candidates.slice().sort((a, b) => {
             const d = tierSortValue(a.tier) - tierSortValue(b.tier);
             if (d !== 0) return d;
-            return Number(b.bannerScore || 0) - Number(a.bannerScore || 0);
+            const adj = adjustedScore(b) - adjustedScore(a);
+            if (adj !== 0) return adj;
+            // Equal achievable total: prefer the safer counter — the one relying on
+            // less undersizing (higher full-squad score banks the same with no risk).
+            return (Number(b.bannerScore) || 0) - (Number(a.bannerScore) || 0);
         });
 
         for (const c of cands) {
@@ -602,7 +606,7 @@ function solveAllocation(teams) {
             req.forEach(ch => usedChars.add(ch));
             assign[t.key] = c;
 
-            dfs(i + 1, cov + 1, tier + tierSortValue(c.tier), ban + Number(c.bannerScore || 0));
+            dfs(i + 1, cov + 1, tier + tierSortValue(c.tier), ban + adjustedScore(c));
 
             delete assign[t.key];
             usedCounters.delete(c.counterId);
@@ -615,6 +619,31 @@ function solveAllocation(teams) {
 
     dfs(0, 0, 0, 0);
     return best || { assign: {}, coverage: 0, tierSum: 0, bannerSum: 0 };
+}
+
+// Detect when undersizing is what won a counter its recommendation (v2.9). Returns
+// an explanatory sentence if, among the same team's other candidates, some rival in
+// the SAME tier has a higher full-squad banner score than the chosen counter yet a
+// lower-or-equal undersize-adjusted score — meaning the chosen counter only ranked
+// above it because of its droppable-unit bonus. Without this note, the card's
+// full-squad headline (kept deliberately as the no-risk figure) could sit below a
+// rival's headline with no visible reason. Returns null when the pick was not
+// undersize-driven, so the base reason is left untouched.
+function undersizeDrovePick(team, chosen) {
+    const chosenDrop = Math.max(0, Math.floor(Number(chosen.undersize)) || 0);
+    if (chosenDrop <= 0) return null;                       // chosen doesn't undersize; can't be undersize-driven
+    const chosenFull = Number(chosen.bannerScore) || 0;
+    const chosenAdj  = chosenFull + chosenDrop;
+    const chosenTier = tierSortValue(chosen.tier);
+
+    const rival = team.candidates.find(c =>
+        c.counterId !== chosen.counterId &&
+        tierSortValue(c.tier) === chosenTier &&                       // same tier
+        (Number(c.bannerScore) || 0) > chosenFull &&                 // higher at full squad
+        adjustedScore(c) <= chosenAdj);                              // but not once undersize is counted
+
+    if (!rival) return null;
+    return `Chosen for its undersize potential (${chosenAdj} vs ${Number(rival.bannerScore) || 0}).`;
 }
 
 // Plain-language reason for each team, grounded in the plan's real alternatives.
@@ -667,6 +696,14 @@ function buildReasons(eligible, assign) {
             } else {
                 reason = "Strongest available option for this team.";
             }
+
+            // v2.9: if this counter was chosen over a same-tier rival that scores
+            // higher at full squad — i.e. it only came out ahead on its undersize
+            // adjustment — say so, otherwise the card's full-squad headline can look
+            // lower than a rival's for no visible reason.
+            const undersizeNote = undersizeDrovePick(t, chosen);
+            if (undersizeNote) reason += " " + undersizeNote;
+
             reasons[t.key] = { counter: chosen, reason };
             return;
         }
@@ -1507,6 +1544,21 @@ function undersizeInfo(counter) {
         bonus: drop,                                  // +1 banner net per unit dropped
         total: full + drop                            // reconstructed best-case total
     };
+}
+
+// The score the allocation engine RANKS by (v2.9): the full-squad banner score
+// plus the safe droppable-unit count, since +1 banner is bankable per unit dropped.
+// This is the achievable best for a counter that can undersize, so ranking by it
+// makes the engine prefer the higher-scoring option when two counters are otherwise
+// comparable. It is used ONLY for ranking — the card still displays the full-squad
+// bannerScore as its headline (with the undersize upside shown on its own line), so
+// the headline never overstates what a straight, no-risk play would bank. Tier
+// remains the primary sort key, so this only ever reorders counters WITHIN a tier;
+// undersizing never promotes a lower-tier counter over a higher-tier one.
+function adjustedScore(counter) {
+    const full = Number(counter && counter.bannerScore) || 0;
+    const drop = Math.max(0, Math.floor(Number(counter && counter.undersize)) || 0);
+    return full + drop;
 }
 
 function renderTeamRecommendation(territoryKey, team) {
